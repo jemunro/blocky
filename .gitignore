@@ -1,0 +1,13 @@
+# Build artefacts
+nimcache/
+*.exe
+paravar
+
+# Test fixtures (generated, not committed)
+tests/data/*.vcf.gz
+tests/data/*.vcf.gz.tbi
+tests/data/*.vcf.gz.csi
+tests/data/*.vcf
+
+# Nimble package cache
+.nimble/
