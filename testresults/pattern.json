@@ -1,4 +1,5 @@
 [
-{"name":"tests/test_bgzf_utils.nim c","category":"pattern","target":"c","action":"run","result":"reSuccess","expected":"","given":"","machine":"slurm-login03.hpc.wehi.edu.au","commit":"9af9b989e28","branch":"main"},
-{"name":"tests/test_cli.nim c","category":"pattern","target":"c","action":"run","result":"reSuccess","expected":"","given":"","machine":"slurm-login03.hpc.wehi.edu.au","commit":"9af9b989e28","branch":"main"},
-{"name":"tests/test_scatter.nim c","category":"pattern","target":"c","action":"run","result":"reSuccess","expected":"","given":"","machine":"slurm-login03.hpc.wehi.edu.au","commit":"9af9b989e28","branch":"main"}]
+{"name":"tests/test_bgzf_utils.nim c","category":"pattern","target":"c","action":"run","result":"reSuccess","expected":"","given":"","machine":"slurm-login03.hpc.wehi.edu.au","commit":"ae8aed8bd95","branch":"main"},
+{"name":"tests/test_cli.nim c","category":"pattern","target":"c","action":"run","result":"reSuccess","expected":"","given":"","machine":"slurm-login03.hpc.wehi.edu.au","commit":"ae8aed8bd95","branch":"main"},
+{"name":"tests/test_run.nim c","category":"pattern","target":"c","action":"run","result":"reSuccess","expected":"","given":"","machine":"slurm-login03.hpc.wehi.edu.au","commit":"ae8aed8bd95","branch":"main"},
+{"name":"tests/test_scatter.nim c","category":"pattern","target":"c","action":"run","result":"reSuccess","expected":"","given":"","machine":"slurm-login03.hpc.wehi.edu.au","commit":"ae8aed8bd95","branch":"main"}]

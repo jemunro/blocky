@@ -6,14 +6,16 @@ Agentic development instructions for Claude Code. Read this file in full before 
 
 ## Project overview
 
-**paravar** is a Nim tool for parallel processing of VCF files, built on top of [hts-nim](https://github.com/brentp/hts-nim).
+**paravar** is a Nim CLI tool for parallelising VCF processing by exploiting BGZF block boundaries and tabix/CSI indexes.
 
-Subcommands (only `scatter` is in scope now):
-- `scatter` — split a bgzipped VCF into N roughly equal shards without decompressing middle BGZF blocks
-- `gather` — merge shards into a sorted VCF (future)
-- `index` — parallelised tabix/CSI indexing (future)
+### Subcommands
 
-The canonical reference for `scatter` behaviour is `example/scatter_vcf.py`. When in doubt about edge cases, consult that file.
+| Subcommand | Status | Description |
+|---|---|---|
+| `scatter` | ✅ Implemented | Split bgzipped VCF into N roughly equal shards |
+| `run` | ✅ Implemented | Scatter → parallel per-shard tool pipelines → per-shard output files |
+
+The canonical reference for `scatter` behaviour is `example/scatter_vcf.py`.
 
 ---
 
@@ -21,241 +23,253 @@ The canonical reference for `scatter` behaviour is `example/scatter_vcf.py`. Whe
 
 ```
 paravar/
-├── CLAUDE.md                  # this file
+├── CLAUDE.md
 ├── paravar.nimble
 ├── src/
+│   ├── paravar.nim                  # entry point (include paravar/main)
 │   └── paravar/
-│       ├── main.nim           # CLI entry point, subcommand dispatch
-│       ├── scatter.nim        # scatter subcommand implementation
-│       └── bgzf_utils.nim     # low-level BGZF block parsing (no hts-nim dependency)
+│       ├── main.nim                 # CLI dispatch
+│       ├── scatter.nim              # scatter algorithm
+│       ├── bgzf_utils.nim           # low-level BGZF I/O (no hts-nim)
+│       └── run.nim                  # run subcommand
 ├── tests/
-│   ├── data/                  # generated test fixtures (not committed)
-│   ├── generate_fixtures.sh   # script to create tests/data/ fixtures
-│   ├── test_bgzf_utils.nim
-│   ├── test_scatter.nim
-│   └── test_cli.nim
-├── example/
-│   └── scatter_vcf.py         # Python reference implementation
-└── README.md
+│   ├── data/                        # generated fixtures (not committed)
+│   ├── generate_fixtures.sh
+│   ├── test_bgzf_utils.nim          # ✅
+│   ├── test_scatter.nim             # ✅
+│   ├── test_cli.nim                 # ✅
+│   └── test_run.nim                 # 🔲 to be created
+└── example/
+    └── scatter_vcf.py               # Python reference implementation
 ```
 
 Do not restructure the module layout without asking the user.
 
 ---
 
-## Tech stack
+## Dependencies
 
-- **Language**: Nim (user is a Nim novice — see style guidance below)
-- **VCF/BGZF library**: [hts-nim](https://github.com/brentp/hts-nim) — use for VCF header parsing, variant iteration, and index reading
-- **Test framework**: [testament](https://nim-lang.org/docs/testament.html) — Nim's native test runner
-- **Platform**: Linux; htslib available system-wide or via conda
-- **Build**: `nimble build` / `nimble test`
+| Dependency | Use |
+|---|---|
+| zlib (`-lz`) | BGZF compress/decompress in `bgzf_utils.nim` |
 
----
-
-## Nim style guide (read carefully — user is new to Nim)
-
-These rules exist so the code is readable to someone coming from Python/R/C.
-
-- **Prefer explicit types** on proc signatures — never rely on type inference for proc parameters.
-- **Named result variables** over `return` in non-trivial procs: use `result =` and let the proc return implicitly.
-- **Error handling**: use `doAssert` in tests; use `quit(msg, 1)` or raise a typed exception in production code. Never use bare `assert` in production.
-- **No `var` unless mutation is required**. Prefer `let` for bindings.
-- **Avoid templates and macros** unless there is no cleaner alternative — they hurt readability for Nim novices.
-- **Comment all procs** with a doc comment (`## description`) explaining purpose, not implementation.
-- **Keep procs short** — if a proc exceeds ~50 lines, split it.
-- **Prefer `openArray[byte]`** over raw pointer arithmetic when possible.
-- For file I/O, prefer Nim's standard `streams` or `system` I/O over manual `fread`-style unless raw speed is critical (which it is for BGZF block copying — see below).
+No nimble package dependencies. Do not add any without asking the user.
 
 ---
 
-## Scatter subcommand — design specification
+## Tech stack and style
+
+- **Language**: Nim (user is a Nim novice — coming from Python/R/C)
+- **Test framework**: testament
+- **Platform**: Linux; zlib available system-wide or via conda
+
+### Nim style rules
+
+- Explicit types on all proc signatures — no implicit parameter type inference
+- `let` by default; `var` only when mutation is required
+- Named `result =` over `return` in non-trivial procs
+- User-facing errors: print to stderr, include offending path/value, `quit(1)`
+- Doc comment (`## ...`) on every exported proc
+- No templates or macros unless unavoidable
+- Procs > ~50 lines should be split
+
+---
+
+## Current state of scatter
+
+Scatter is implemented and passing tests. Known gap relevant to `run`:
+
+> **Scatter currently writes shards to files only.** The shard writer takes a file path, not a file descriptor. Before implementing `run`, this must be refactored so the writer accepts a generic writable target — specifically a pipe write-end fd — without changing existing file-write behaviour.
+
+---
+
+## `run` subcommand — specification
+
+### Purpose
+
+Scatter a VCF into N shards, pipe each shard through a user-supplied tool pipeline, and collect each pipeline's stdout into a numbered output file. All shards run concurrently up to `--jobs`.
 
 ### CLI
 
 ```
-paravar scatter -n <n_shards> -o <prefix> input.vcf.gz
+paravar run --shards N [--jobs J] -o <prefix> <input.vcf.gz> \
+  --- <cmd1> [args...] \
+  [--- <cmd2> [args...] ...]
 ```
 
-Outputs: `<prefix>.01.vcf.gz`, `<prefix>.02.vcf.gz`, ... (zero-padded to width of `n_shards`).
+### `---` separator
 
-Each shard is a valid bgzipped VCF (with header + terminating BGZF EOF block).
+`---` (three dashes) is the pipe-stage separator. It was chosen over `--` to avoid collision with tools (e.g. bcftools plugins) that use `--` as their own argument separator.
 
-### Algorithm (must match `example/scatter_vcf.py`)
+- Every token in `argv` that is exactly `"---"` is a stage boundary
+- Everything before the first `---` belongs to paravar's own arguments
+- Everything after the first `---` is one or more stage definitions
+- Multiple `---` blocks define a pipeline: stages are joined with `|` and executed via `sh -c`
+- Quoting is optional for simple cases; required only if a stage command itself contains `---` (essentially never)
 
-#### Phase 1 — read index for coarse block starts
+**Examples:**
 
-1. Detect `.tbi` or `.csi` index alongside the input. Abort with a clear error if neither exists.
-2. Parse the binary index to extract BGZF virtual offsets; shift right by 16 to get file offsets of BGZF blocks that contain indexed records.
-3. This gives a coarse set of block starts — only blocks that index entries point to, not every block in the file.
+```bash
+# Single stage
+paravar run --shards 10 -o out input.vcf.gz \
+  --- bcftools view -i "GT='alt'" -Oz
 
-#### Phase 2 — extract header + first-block offset
+# Multi-stage pipeline (bcftools plugin using its own --)
+paravar run --shards 10 -o out input.vcf.gz \
+  --- bcftools +split-vep -Ou -- -f '%SYMBOL\n' \
+  --- bcftools view -s Sample -Oz
 
-1. Open the VCF via hts-nim and read all `#` header lines.
-2. Record the BGZF file offset of the first non-header record (virtual offset >> 16).
-3. Compress the header text into a fresh BGZF block — this becomes the `header_bytes` prepended to every shard.
+# Concurrency control
+paravar run --shards 50 --jobs 8 -o out input.vcf.gz \
+  --- bcftools view -i "GT='alt'" -Oz
+```
 
-#### Phase 3 — optimise shard boundaries
+### Options
 
-1. Compute cumulative byte lengths of blocks; use weighted bisection to pick `n_shards - 1` split points that produce roughly equal total sizes.
-2. For each candidate split block, scan the raw file bytes to enumerate every BGZF sub-block within that block (resolving finer offsets than the index provides).
-3. Validate each split block: decompress it and confirm it contains at least one complete record terminated by `\n` before the next block starts. If not, mark it invalid and retry with exclusions (up to 1000 iterations).
-
-#### Phase 4 — write shards
-
-For each shard `i`:
-- **Prepend**: `header_bytes` (for shard 0, also remove any header lines from the first data block if it overlaps with the header region).
-- **Middle blocks**: raw byte-copy from file — no decompression, no recompression.
-- **Boundary block** (the block straddling the shard split):
-  - Decompress the block.
-  - Split on record lines (`\n`): first half goes to shard `i` as its tail; second half goes to shard `i+1` as its prepend (after the header).
-  - Recompress each half as a BGZF block.
-- **Append**: BGZF EOF block (`\x1f\x8b\x08\x04\x00\x00\x00\x00\x00\xff\x06\x00BC\x02\x00\x1b\x00\x03\x00\x00\x00\x00\x00\x00\x00\x00\x00`).
-
-### Module split
-
-| Module | Responsibility |
+| Flag | Description |
 |---|---|
-| `bgzf_utils.nim` | Parse BGZF block headers, scan block starts, raw byte copy, decompress/recompress boundary blocks. No hts-nim dependency — pure file I/O + zlib. |
-| `scatter.nim` | Parse TBI/CSI index, orchestrate phases 1–4, write output files. Uses hts-nim for VCF header and index parsing where available; falls back to `bgzf_utils` for raw block work. |
-| `main.nim` | CLI arg parsing (`parseopt` or `cligen`), subcommand dispatch. |
+| `-n` / `--shards` | Number of shards (required) |
+| `--jobs N` | Max simultaneous shard pipelines (default: nproc; 0 = all CPUs) |
+| `-o <prefix>` | Output prefix. Shards written to `<prefix>.01.vcf.gz`, `<prefix>.02.vcf.gz`, … |
+| `-v` / `--verbose` | Print per-shard progress to stderr |
+
+### Output files
+
+Outputs are named `<prefix>.<N>.vcf.gz` (zero-padded to width of `--shards`), one per shard. The content is the raw stdout of the final pipeline stage — no post-processing. If the tool writes bgzipped output (`-Oz`), the file will be valid bgzipped VCF. If the tool writes uncompressed VCF, the file will be uncompressed. **paravar does not recompress or validate the output** — it is the user's responsibility to pass the right output format flag to the last stage.
+
+### Data flow
+
+```
+input.vcf.gz
+     │
+  [scatter]   ← existing scatter logic, shard bytes written to pipe write-end
+     │
+  shard 1 → pipe → sh -c "cmd1 | cmd2 | ..." → stdout → prefix.01.vcf.gz  ┐
+  shard 2 → pipe → sh -c "cmd1 | cmd2 | ..." → stdout → prefix.02.vcf.gz  ├ (up to --jobs concurrent)
+  shard N → pipe → sh -c "cmd1 | cmd2 | ..." → stdout → prefix.0N.vcf.gz  ┘
+```
+
+No temporary files. Each shard's bytes flow directly from the scatter writer into the stdin pipe of its shell pipeline.
+
+### Per-shard pipeline construction
+
+For a given shard, build the shell command string by joining stages with ` | `:
+
+```nim
+let shellCmd = stages.join(" | ")
+# e.g. "bcftools +split-vep -Ou -- -f '%SYMBOL\n' | bcftools view -s Sample -Oz"
+```
+
+Then spawn `sh -c <shellCmd>` with:
+- `stdin` = pipe read-end (scatter writes shard bytes to write-end)
+- `stdout` = output file (opened for writing)
+- `stderr` = inherited (passes tool stderr through to terminal)
+
+Use Nim's `osproc.startProcess` with `{poUsePath}` and explicit pipe fds.
+
+### Concurrency model
+
+Use a simple worker-pool pattern:
+
+1. Build a sequence of N shard work items (index, byte range, output path)
+2. Dispatch up to `--jobs` items concurrently using a channel or counter semaphore
+3. For each completed shard, check exit code — if non-zero, print shard index and exit code to stderr, set a global failure flag, but allow other running shards to complete
+4. After all shards finish: if any failed, exit 1; otherwise exit 0
+
+**By default, kill all sibling shards when any shard fails** (send SIGTERM to all in-flight children, wait for them, then exit 1). This avoids wasting CPU on a doomed run.
+
+Add a `--no-kill` flag that disables this: with `--no-kill`, sibling shards are allowed to complete before exiting 1. Useful for debugging (all partial outputs remain on disk).
+
+### Error handling requirements
+
+- Missing `---`: exit 1 with `"paravar run: at least one --- stage is required"`
+- Empty stage (two consecutive `---`): exit 1 with `"paravar run: empty pipeline stage"`
+- Shard pipeline exits non-zero: print `"shard N: pipeline exited with code X"` to stderr; continue remaining shards; exit 1 at end
+- Output file open failure: exit 1 immediately with path and errno
 
 ---
 
-## Testing specification
+## Refactor required before implementing `run`
 
-### Test fixture generation
+### Task: abstract the scatter shard writer
 
-Before running tests, `tests/generate_fixtures.sh` must be run once. It uses `bcftools` and `bgzip`/`tabix` to create:
+In `scatter.nim` (or `bgzf_utils.nim`, wherever `writeShard` lives):
 
-- `tests/data/small.vcf.gz` — ~200 records across 2–3 chromosomes, bgzipped, tabix indexed
-- `tests/data/single_chrom.vcf.gz` — single chromosome, for edge-case testing
-- `tests/data/tiny.vcf.gz` — fewer records than n_shards (for error-path tests)
+1. Change the writer to accept a file descriptor (`cint`) rather than a `string` path
+2. For the existing `scatter` subcommand: open the output file, pass its fd — behaviour unchanged
+3. For `run`: pass the write-end of a pipe created with `posix.pipe()`
+4. Ensure the BGZF EOF block is still written in both cases
+5. Run `nimble test` — all existing scatter and CLI tests must pass unchanged
 
-The script must be idempotent (skip if files exist). Do not commit generated fixtures.
+This is a pure internal refactor. Do not change the scatter CLI or public test interface.
 
-### Test files and what they cover
+---
 
-**`tests/test_bgzf_utils.nim`**
-- `scanBgzfBlockStarts`: given a known bgzipped file, returns the correct file offsets
-- `rawCopyBytes`: byte-copies a range, result is identical to the source slice
-- `compressToBgzf` / `decompressBgzf`: round-trip identity
-- Boundary block split: splitting a block on its midpoint line produces two valid BGZF blocks that concatenate back to the original
+## Testing specification for `run`
 
-**`tests/test_scatter.nim`**
-- Scatter into 1 shard: output equals input (after normalising the header block)
-- Scatter into N shards: each shard is a valid bgzipped VCF (check magic bytes + EOF block)
-- Scatter into N shards: all records present, no duplicates (parse and collect all CHROM:POS:REF:ALT from all shards, compare to original)
-- Scatter into N shards: records within each shard are in correct genomic order
-- Shard sizes are roughly equal (largest / smallest < 2.0 for a balanced input)
-- `n_shards` > number of BGZF blocks: exits with a clear error message and non-zero exit code
+### Fixtures
 
-**`tests/test_cli.nim`**
-- Missing index file: exits non-zero with message containing "index"
-- Missing `-n`: exits non-zero
-- Invalid `-n 0`: exits non-zero
+Reuse `tests/data/small.vcf.gz` (already generated by `generate_fixtures.sh`). No new fixtures needed for basic `run` tests.
 
-### Running tests
+### `tests/test_run.nim`
+
+| Test | What it checks |
+|---|---|
+| Single stage, 1 shard | Output file exists, records match input |
+| Single stage, 4 shards | 4 output files; union of records matches input (no duplicates, no missing) |
+| Multi-stage pipeline | Two `---` stages; output is correct |
+| `--jobs 1` | Serial fallback; same correctness as parallel |
+| `--jobs` > shards | No hang or error |
+| Stage exits non-zero | paravar exits 1; stderr contains shard index |
+| Missing `---` | Exits 1 with appropriate message |
+| bcftools plugin `--` passthrough | `--- bcftools +fill-tags -Ou -- -t AF` works without quoting issues |
+
+### Running
 
 ```bash
-# Generate fixtures (once, or after deleting tests/data/)
-bash tests/generate_fixtures.sh
+bash tests/generate_fixtures.sh    # if not already done
 
-# Run all tests
+export PATH="$HOME/.choosenim/toolchains/nim-2.2.8/bin:$PATH"
+
 nimble test
-
-# Run a single test file
-nim c -r tests/test_bgzf_utils.nim
+nim c -r tests/test_run.nim        # single file
 ```
 
 ---
 
 ## Workflow rules for Claude Code
 
-These are hard rules. Do not deviate without asking the user.
-
 ### Before starting any task
 
-1. Re-read this file.
-2. Read the relevant source file(s) in full.
-3. Consult `example/scatter_vcf.py` if the task touches scatter logic.
+1. Re-read this file in full
+2. Read the relevant source files
+3. Consult `example/scatter_vcf.py` for any scatter-related behaviour questions
 
-### Dependency rule
+### Hard rules
 
-**Do not add new nimble dependencies** (to `paravar.nimble`) without asking the user first. The only allowed dependencies to start are:
-- `hts` (hts-nim)
-- `cligen` (CLI parsing — ask before adding)
-
-For zlib/BGZF decompression: use htslib's bundled `bgzf.h` via hts-nim's FFI, or Nim's `zlib` wrapper. Do not pull in a third-party pure-Nim zlib.
-
-### Testing rule
-
-**Always run `nimble test` (or the single relevant test file) before declaring any implementation step done.** Report the full test output. Do not summarise as "tests pass" without showing output.
-
-### Commit rule
-
-**Do not run `git commit`**. Stage changes and show a proposed commit message, then wait for the user.
-
-### Error handling rule
-
-All user-facing errors must:
-1. Print to stderr
-2. Include the offending file path or value
-3. Exit with code 1
-
-Never call `quit()` or `raise` silently.
-
-### Code generation rule
-
-Write code in small, testable units. Implement one proc at a time, run its unit test, then proceed. Do not write 200-line files in a single pass.
-
-### When stuck
-
-If you cannot determine the correct behaviour from this file or the Python reference, stop and ask the user. Do not guess on index format parsing, BGZF structure, or output file format.
+| Rule | Detail |
+|---|---|
+| **No new dependencies** | Do not add to `paravar.nimble` without asking |
+| **Test before done** | Run `nimble test` (or the relevant test file) and show full output before declaring a step complete |
+| **No commits** | Stage changes, propose a commit message, wait for user |
+| **No layout changes** | Do not restructure modules without asking |
+| **Small units** | Implement one proc at a time, test it, then proceed |
+| **Ask when uncertain** | If behaviour is ambiguous and not covered by this file or the Python reference, stop and ask |
 
 ---
 
-## Build cheatsheet (for Claude's reference)
+## Build reference
 
 ```bash
-# Install hts-nim
-nimble install hts -y
-
-# Build debug
-nimble build
-
-# Build release
-nimble build -d:release
-
-# Run tests
-nimble test
-
-# Compile a single file (fast iteration)
-nim c -d:debug -r tests/test_bgzf_utils.nim
-```
-
-### hts-nim VCF snippet (reference)
-
-```nim
-import hts
-
-var vcf: VCF
-doAssert open(vcf, "input.vcf.gz", index = true)
-echo vcf.header.hdr  # raw htslib header pointer
-
-for rec in vcf:
-  echo rec.CHROM, "\t", rec.POS
-
-# Write header to new VCF
-var wtr: VCF
-doAssert open(wtr, "out.vcf.gz", mode = "wz")
-wtr.header = vcf.header
-doAssert wtr.write_header()
+nimble build                            # debug
+nimble build -d:release                 # release
+nimble test                             # all tests
+nim c -d:debug -r tests/test_run.nim    # single test file
 ```
 
 ### BGZF EOF block constant
 
-Every output shard must end with this exact 28-byte sequence:
+Every scatter output shard must end with this 28-byte sequence:
 
 ```nim
 const BGZF_EOF* = [
@@ -266,31 +280,35 @@ const BGZF_EOF* = [
 ]
 ```
 
-### TBI / CSI parsing
-
-hts-nim exposes `tbx_t` via `hts/tbx`. Prefer using the hts-nim API to open and iterate the index rather than parsing binary manually. Fall back to manual parsing (mirroring the Python reference) only if the API doesn't expose block offsets.
-
 ---
 
 ## Step-by-step plan
 
-Execute these steps in order. Do not jump ahead. Check off each step (update this file) as it is completed.
+Execute in order. Do not skip ahead. Update checkboxes as steps complete.
 
-- [x] **Step 0**: Scaffold — create `paravar.nimble`, directory layout, stub `main.nim`
-- [x] **Step 1**: Write `tests/generate_fixtures.sh` and verify it produces valid indexed VCFs
-- [x] **Step 2**: Implement and test `bgzf_utils.nim` — block scanning, raw copy, compress/decompress, boundary split
-- [x] **Step 3**: Implement and test TBI/CSI index parsing in `scatter.nim`
-- [x] **Step 4**: Implement and test shard boundary optimisation logic
-- [ ] **Step 5**: Implement and test shard writing (prepend header + raw copy + boundary blocks + EOF)
-- [ ] **Step 6**: Wire up `main.nim` CLI and run `test_cli.nim`
-- [ ] **Step 7**: End-to-end validation: scatter `small.vcf.gz` into 4 shards, verify record completeness and order
+### Scatter (complete)
+- [x] Scaffold: `paravar.nimble`, directory layout, stub `main.nim`
+- [x] `tests/generate_fixtures.sh` — synthetic indexed VCFs
+- [x] `bgzf_utils.nim` — block scanning, raw copy, compress/decompress, boundary split
+- [x] TBI/CSI index parsing in `scatter.nim`
+- [x] Shard boundary optimisation
+- [x] Shard writing (header prepend + raw copy + boundary blocks + EOF)
+- [x] `main.nim` CLI wiring + `test_cli.nim`
+- [x] End-to-end validation
+
+### Run (next)
+- [x] **Step R1**: Refactor scatter shard writer to accept a `cint` fd instead of a file path. Run `nimble test` — all existing tests must pass.
+- [x] **Step R2**: Implement `---` argv parsing: extract paravar args and stage list, build shell command string. Unit test the parser in isolation (pure string logic, no I/O).
+- [x] **Step R3**: Implement single-shard pipe execution in `run.nim`: `posix.pipe()` → `startProcess("sh -c", shellCmd)` → write shard bytes to pipe write-end → collect stdout to output file → wait for exit code. Test with 1 shard using `cat` as the stage command.
+- [x] **Step R4**: Implement worker pool (`--jobs`): dispatch N shards concurrently up to job limit, collect exit codes, handle failures per spec. Test with 4 shards.
+- [x] **Step R5**: Wire `run` into `main.nim` dispatch. Write `tests/test_run.nim` covering all cases in the testing spec. Run full `nimble test`.
 
 ---
 
 ## Out of scope (do not implement)
 
-- `gather` subcommand
-- `index` subcommand
-- BCF input/output (design with it in mind, but do not implement)
-- Multithreaded shard writing (the Python prototype supports `--threads`; defer this)
-- `--chunk` / `--stdout` flags from the Python prototype (defer)
+- BCF input/output
+- `run` with pre-scattered input glob
+- Windows support
+- Tools that do not support stdin/stdout (explicitly unsupported — no workaround attempted)
+- `-o` flags inside pipeline stage commands (user's responsibility to avoid)
