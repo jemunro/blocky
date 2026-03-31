@@ -9,6 +9,8 @@ import "../src/paravar/scatter"
 const DataDir  = "tests/data"
 const SmallVcf = DataDir / "small.vcf.gz"     # TBI indexed
 const CsiVcf   = DataDir / "small_csi.vcf.gz" # CSI indexed only (no .tbi)
+const SmallBcf = DataDir / "small.bcf"
+const KgBcf    = DataDir / "chr22_1kg.bcf"
 
 proc readMagic(path: string; offset: int64): array[3, byte] =
   let f = open(path, fmRead)
@@ -266,6 +268,16 @@ block testScatter4ShardsTbi:
 # Step 5 — scatter: CSI-indexed input
 # ===========================================================================
 
+block testVcfScatter1Shard:
+  ## 1 shard must equal the original (record set and order).
+  let tmpDir = getTempDir() / "paravar_scatter_vcf_1shard_test"
+  createDir(tmpDir)
+  let prefix = tmpDir / "shard"
+  scatter(SmallVcf, 1, prefix)
+  checkShards(SmallVcf, prefix, 1)
+  echo "PASS VCF scatter 1 shard: BGZF structure, header, completeness"
+  removeDir(tmpDir)
+
 block testScatterNoIndexAutoScan:
   ## With no index alongside the file, scatter should warn and auto-scan.
   let tmpDir = getTempDir() / "paravar_scatter_scan_test"
@@ -297,6 +309,187 @@ block testScatter4ShardsCsi:
   scatter(CsiVcf, 4, prefix)
   checkShards(CsiVcf, prefix, 4)
   echo "PASS scatter CSI: BGZF structure, header, completeness, order"
+  removeDir(tmpDir)
+
+# ===========================================================================
+# Step B3 — BCF header extraction
+# ===========================================================================
+
+proc leU32At(data: seq[byte]; pos: int): uint32 =
+  data[pos].uint32 or (data[pos+1].uint32 shl 8) or
+  (data[pos+2].uint32 shl 16) or (data[pos+3].uint32 shl 24)
+
+block testExtractBcfHeaderSmall:
+  let hdrBytes = extractBcfHeader(SmallBcf)
+  # Must be a valid BGZF block sequence
+  doAssert bgzfBlockSize(hdrBytes) > 0,
+    "extractBcfHeader: result does not start with a valid BGZF block"
+  # Decompress the first block and verify BCF magic
+  let firstBlkSize = bgzfBlockSize(hdrBytes)
+  let firstDecomp  = decompressBgzf(hdrBytes[0 ..< firstBlkSize])
+  doAssert firstDecomp.len >= 9,
+    "extractBcfHeader: first decompressed block too short to contain BCF header"
+  doAssert firstDecomp[0] == byte('B') and firstDecomp[1] == byte('C') and
+           firstDecomp[2] == byte('F') and firstDecomp[3] == 0x02'u8 and
+           firstDecomp[4] == 0x02'u8,
+    "extractBcfHeader: result does not start with BCF magic"
+  # l_text must be positive
+  let lText = leU32At(firstDecomp, 5).int64
+  doAssert lText > 0, &"extractBcfHeader: l_text={lText} is not positive"
+  # Total decompressed content must equal exactly 5 + 4 + l_text bytes
+  let expectedSize = 5 + 4 + lText.int
+  var totalDecomp = 0
+  var pos = 0
+  while pos < hdrBytes.len:
+    let blkSz = bgzfBlockSize(hdrBytes[pos ..< hdrBytes.len])
+    if blkSz <= 0: break
+    totalDecomp += decompressBgzf(hdrBytes[pos ..< pos + blkSz]).len
+    pos += blkSz
+  doAssert totalDecomp == expectedSize,
+    &"extractBcfHeader: decompressed {totalDecomp} bytes, expected {expectedSize}"
+  echo &"PASS extractBcfHeader small.bcf (l_text={lText})"
+
+block testExtractBcfHeaderLarge:
+  # chr22_1kg.bcf has 2504 samples — verify extractBcfHeader handles it correctly.
+  doAssert fileExists(KgBcf), &"large BCF fixture missing: {KgBcf}"
+  let hdrBytes = extractBcfHeader(KgBcf)
+  doAssert bgzfBlockSize(hdrBytes) > 0,
+    "extractBcfHeader large: result does not start with a valid BGZF block"
+  let firstBlkSize = bgzfBlockSize(hdrBytes)
+  let firstDecomp  = decompressBgzf(hdrBytes[0 ..< firstBlkSize])
+  doAssert firstDecomp.len >= 9
+  doAssert firstDecomp[0] == byte('B') and firstDecomp[1] == byte('C') and
+           firstDecomp[2] == byte('F') and firstDecomp[3] == 0x02'u8 and
+           firstDecomp[4] == 0x02'u8,
+    "extractBcfHeader large: result does not start with BCF magic"
+  let lText = leU32At(firstDecomp, 5).int64
+  doAssert lText > 0, &"extractBcfHeader large: l_text={lText} is not positive"
+  let expectedSize = 5 + 4 + lText.int
+  # Total decompressed bytes across all output blocks must equal exactly 5 + 4 + l_text
+  var totalDecomp = 0
+  var pos = 0
+  while pos < hdrBytes.len:
+    let blkSz = bgzfBlockSize(hdrBytes[pos ..< hdrBytes.len])
+    if blkSz <= 0: break
+    totalDecomp += decompressBgzf(hdrBytes[pos ..< pos + blkSz]).len
+    pos += blkSz
+  doAssert totalDecomp == expectedSize,
+    &"extractBcfHeader large: decompressed {totalDecomp} bytes, expected {expectedSize}"
+  echo &"PASS extractBcfHeader chr22_1kg.bcf (l_text={lText})"
+
+# ===========================================================================
+# Step B4 — BCF scatter end-to-end
+# ===========================================================================
+
+proc collectBcfRecordBytes(path: string): seq[seq[byte]] =
+  ## Decompress BCF file, skip header, return raw bytes of each complete record.
+  let data = decompressBgzfFile(path)
+  if data.len < 9: return @[]
+  let lText = leU32At(data, 5).int
+  var pos = 5 + 4 + lText
+  while pos + 8 <= data.len:
+    let lShared = leU32At(data, pos).int
+    let lIndiv  = leU32At(data, pos + 4).int
+    let recLen  = 8 + lShared + lIndiv
+    if pos + recLen > data.len: break
+    result.add(data[pos ..< pos + recLen])
+    pos += recLen
+
+proc cmpRecBytes(a, b: seq[byte]): int =
+  for i in 0 ..< min(a.len, b.len):
+    if a[i] < b[i]: return -1
+    if a[i] > b[i]: return 1
+  cmp(a.len, b.len)
+
+proc checkBcfShards(bcfPath: string; prefix: string; n: int) =
+  ## Verify BGZF structure, BCF magic, record completeness, and order.
+  let nDigits = len($n)
+
+  # 1 — each shard exists with .bcf extension, valid BGZF magic, BGZF EOF
+  for i in 1..n:
+    let path = prefix & "." & align($i, nDigits, '0') & ".bcf"
+    doAssert fileExists(path), &"BCF shard {i} missing: {path}"
+    let sz = getFileSize(path)
+    let f = open(path, fmRead)
+    var hdrBuf = newSeq[byte](3)
+    discard readBytes(f, hdrBuf, 0, 3)
+    doAssert hdrBuf[0] == 0x1f'u8 and hdrBuf[1] == 0x8b'u8,
+      &"BCF shard {i}: bad BGZF magic"
+    f.setFilePos(sz - 28)
+    var eofBuf = newSeq[byte](28)
+    discard readBytes(f, eofBuf, 0, 28)
+    f.close()
+    doAssert eofBuf == @BGZF_EOF, &"BCF shard {i}: EOF block mismatch"
+
+  # 2 — each shard decompresses and starts with BCF magic
+  for i in 1..n:
+    let path = prefix & "." & align($i, nDigits, '0') & ".bcf"
+    let data = decompressBgzfFile(path)
+    doAssert data.len >= 9, &"BCF shard {i}: decompressed data too short"
+    doAssert data[0] == byte('B') and data[1] == byte('C') and
+             data[2] == byte('F') and data[3] == 0x02'u8 and
+             data[4] == 0x02'u8, &"BCF shard {i}: bad BCF magic"
+
+  # 3 — all records present across shards, no duplicates
+  var shardRecs: seq[seq[byte]]
+  for i in 1..n:
+    let path = prefix & "." & align($i, nDigits, '0') & ".bcf"
+    shardRecs.add(collectBcfRecordBytes(path))
+  let origRecs = collectBcfRecordBytes(bcfPath)
+  doAssert shardRecs.len == origRecs.len,
+    &"BCF: record count mismatch: shards={shardRecs.len} orig={origRecs.len}"
+  doAssert sorted(shardRecs, cmpRecBytes) == sorted(origRecs, cmpRecBytes),
+    "BCF: shard records do not match original"
+
+  # 4 — records within each shard in non-decreasing genomic order (chrom_idx, pos)
+  for i in 1..n:
+    let path = prefix & "." & align($i, nDigits, '0') & ".bcf"
+    let recs = collectBcfRecordBytes(path)
+    for j in 1 ..< recs.len:
+      if recs[j].len >= 16 and recs[j-1].len >= 16:
+        let prevChrom = leU32At(recs[j-1], 8)
+        let curChrom  = leU32At(recs[j], 8)
+        let prevPos   = leU32At(recs[j-1], 12)
+        let curPos    = leU32At(recs[j], 12)
+        if prevChrom == curChrom:
+          doAssert prevPos <= curPos,
+            &"BCF shard {i}: records out of order at record {j}"
+
+block testBcfScatter1Shard:
+  doAssert fileExists(SmallBcf), &"BCF fixture missing: {SmallBcf}"
+  let tmpDir = getTempDir() / "paravar_bcf_1shard_test"
+  createDir(tmpDir)
+  let prefix = tmpDir / "shard"
+  scatter(SmallBcf, 1, prefix, format = FileFormat.Bcf)
+  checkBcfShards(SmallBcf, prefix, 1)
+  echo "PASS BCF scatter 1 shard: BGZF, BCF magic, completeness"
+  removeDir(tmpDir)
+
+block testBcfScatter4Shards:
+  doAssert fileExists(SmallBcf), &"BCF fixture missing: {SmallBcf}"
+  let tmpDir = getTempDir() / "paravar_bcf_4shard_test"
+  createDir(tmpDir)
+  let prefix = tmpDir / "shard"
+  scatter(SmallBcf, 4, prefix, format = FileFormat.Bcf)
+  checkBcfShards(SmallBcf, prefix, 4)
+  var sizes: seq[int64]
+  for i in 1..4:
+    sizes.add(getFileSize(prefix & "." & $i & ".bcf"))
+  let minSz = sizes.min(); let maxSz = sizes.max()
+  doAssert minSz > 0, "BCF scatter 4 shards: at least one shard is empty"
+  doAssert maxSz.float / minSz.float < 2.0,
+    &"BCF scatter 4 shards: shard size imbalance: max={maxSz} min={minSz}"
+  echo "PASS BCF scatter 4 shards: BGZF, BCF magic, completeness, order, balance"
+  removeDir(tmpDir)
+
+block testBcfScatterLargeHeader:
+  doAssert fileExists(KgBcf), &"large BCF fixture missing: {KgBcf}"
+  let tmpDir = getTempDir() / "paravar_bcf_kg_test"
+  createDir(tmpDir)
+  let prefix = tmpDir / "shard"
+  scatter(KgBcf, 4, prefix, format = FileFormat.Bcf)
+  checkBcfShards(KgBcf, prefix, 4)
+  echo "PASS BCF scatter chr22_1kg.bcf 4 shards: large header handled correctly"
   removeDir(tmpDir)
 
 echo ""

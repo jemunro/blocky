@@ -4,13 +4,28 @@
 import std/[os, strformat]
 import "../src/paravar/bgzf_utils"
 
-const DataDir = "tests/data"
+# zlib CRC32 — already linked via -lz in bgzf_utils
+proc zlibCrc32(crc: culong; buf: pointer; len: cuint): culong
+  {.importc: "crc32", header: "<zlib.h>".}
+
+proc dataCrc32(data: seq[byte]): uint32 =
+  ## Compute CRC32 of data using zlib.
+  if data.len == 0:
+    return zlibCrc32(0, nil, 0).uint32
+  zlibCrc32(0, data[0].unsafeAddr, data.len.cuint).uint32
+
+const DataDir  = "tests/data"
 const SmallVcf = DataDir / "small.vcf.gz"
 const TinyVcf  = DataDir / "tiny.vcf.gz"
+const SmallBcf = DataDir / "small.bcf"
 
 # ---------------------------------------------------------------------------
 # Helper: read raw bytes from a file slice
 # ---------------------------------------------------------------------------
+proc leU32At(data: seq[byte]; pos: int): uint32 =
+  data[pos].uint32 or (data[pos+1].uint32 shl 8) or
+  (data[pos+2].uint32 shl 16) or (data[pos+3].uint32 shl 24)
+
 proc readFileSlice(path: string; start: int64; length: int): seq[byte] =
   let f = open(path, fmRead)
   defer: f.close()
@@ -164,6 +179,166 @@ block testSplitChunk:
   doAssert rejoined == original,
     &"splitChunk: rejoined data != original ({rejoined.len} vs {original.len})"
   echo "PASS splitChunk"
+
+# ---------------------------------------------------------------------------
+# Test: bcfFirstDataOffset — returns the block containing the first BCF record
+# ---------------------------------------------------------------------------
+
+block testBcfFirstDataOffset:
+  let dataOff = bcfFirstDataOffset(SmallBcf)
+  doAssert dataOff >= 0,
+    &"bcfFirstDataOffset: expected non-negative offset, got {dataOff}"
+
+  # Must be a valid BGZF block start
+  let starts = scanBgzfBlockStarts(SmallBcf)
+  doAssert dataOff in starts,
+    &"bcfFirstDataOffset: {dataOff} is not a BGZF block start"
+
+  # Compute l_text from the raw decompressed stream to verify the threshold.
+  let all = decompressBgzfFile(SmallBcf)
+  doAssert all.len >= 9, "small.bcf decompressed too short to contain BCF header"
+  doAssert all[0] == byte('B') and all[1] == byte('C') and
+           all[2] == byte('F') and all[3] == 0x02'u8 and all[4] == 0x02'u8,
+    "small.bcf does not have BCF magic"
+  let lText = leU32At(all, 5).int64
+  let firstRecOff = 5'i64 + 4'i64 + lText
+
+  # Scan blocks and confirm dataOff is the first block that crosses firstRecOff.
+  var cumUncomp = 0'i64
+  var found = false
+  for off in starts:
+    let hdr = readFileSlice(SmallBcf, off, 18)
+    let blkSize = bgzfBlockSize(hdr)
+    if blkSize <= 0: break
+    let blk = readFileSlice(SmallBcf, off, blkSize)
+    let decoLen = decompressBgzf(blk).len.int64
+    if off == dataOff:
+      doAssert cumUncomp <= firstRecOff,
+        &"cumulative before block {off} ({cumUncomp}) already >= firstRecOff ({firstRecOff})"
+      doAssert cumUncomp + decoLen > firstRecOff,
+        &"block at {off} does not cross firstRecOff {firstRecOff}"
+      found = true
+      break
+    cumUncomp += decoLen
+  doAssert found, &"dataOff {dataOff} was not reached while scanning blocks"
+  echo "PASS bcfFirstDataOffset"
+
+# ---------------------------------------------------------------------------
+# Test: splitBcfBoundaryBlock — round-trip: decompressed halves reconstitute original
+# ---------------------------------------------------------------------------
+
+block testSplitBcfBoundaryBlockRoundTrip:
+  let dataOff = bcfFirstDataOffset(SmallBcf)
+  let starts  = scanBgzfBlockStarts(SmallBcf)
+  # Find size of the data block (distance to next block start)
+  var dataSize = 0'i64
+  for i, off in starts:
+    if off == dataOff and i + 1 < starts.len:
+      dataSize = starts[i + 1] - off
+      break
+  doAssert dataSize > 0, "could not determine data block size"
+
+  let raw = readFileSlice(SmallBcf, dataOff, dataSize.int)
+  let original = decompressBgzf(raw)
+
+  let (valid, head, tail) = splitBcfBoundaryBlock(SmallBcf, dataOff, dataSize)
+  doAssert valid, "splitBcfBoundaryBlock returned invalid for a real data block"
+  doAssert bgzfBlockSize(head) > 0, "head is not a valid BGZF block"
+  doAssert bgzfBlockSize(tail) > 0, "tail is not a valid BGZF block"
+
+  let headData = decompressBgzf(head)
+  let tailData = decompressBgzf(tail)
+  doAssert headData & tailData == original,
+    &"round-trip mismatch: {headData.len} + {tailData.len} != {original.len}"
+  echo "PASS splitBcfBoundaryBlock round-trip"
+
+# ---------------------------------------------------------------------------
+# Test: splitBcfBoundaryBlock — head ends on a record boundary (no mid-record split)
+# ---------------------------------------------------------------------------
+
+block testSplitBcfBoundaryBlockMidpoint:
+  let dataOff = bcfFirstDataOffset(SmallBcf)
+  let starts  = scanBgzfBlockStarts(SmallBcf)
+  var dataSize = 0'i64
+  for i, off in starts:
+    if off == dataOff and i + 1 < starts.len:
+      dataSize = starts[i + 1] - off
+      break
+  doAssert dataSize > 0
+
+  let (valid, head, _) = splitBcfBoundaryBlock(SmallBcf, dataOff, dataSize)
+  doAssert valid
+  let headData = decompressBgzf(head)
+  # Walk records in headData — must reach exactly headData.len with no partial record.
+  var pos = 0
+  while pos + 8 <= headData.len:
+    let lShared = leU32At(headData, pos).int
+    let lIndiv  = leU32At(headData, pos + 4).int
+    let recLen  = 8 + lShared + lIndiv
+    doAssert pos + recLen <= headData.len,
+      &"head contains a partial BCF record at pos {pos} (recLen {recLen}, headData.len {headData.len})"
+    pos += recLen
+  doAssert pos == headData.len,
+    &"head has {headData.len - pos} trailing bytes that are not a complete record"
+  echo "PASS splitBcfBoundaryBlock midpoint"
+
+# ---------------------------------------------------------------------------
+# Test: splitBcfBoundaryBlock — zero-record block returns (false, @[], @[])
+# ---------------------------------------------------------------------------
+
+block testSplitBcfBoundaryBlockZeroRecords:
+  # Construct a BGZF block with exactly ONE complete BCF record (l_shared=4, l_indiv=0).
+  # A single record cannot be split, so the proc must return (false, @[], @[]).
+  var recData = newSeq[byte](12)
+  # l_shared = 4 (little-endian uint32)
+  recData[0] = 4; recData[1] = 0; recData[2] = 0; recData[3] = 0
+  # l_indiv = 0 (already zero)
+  # shared data: 4 bytes of zeros (already zero)
+  let blk = compressToBgzf(recData)
+
+  let tmpPath = getTempDir() / "paravar_test_bcf_1rec.bin"
+  let tf = open(tmpPath, fmWrite)
+  discard tf.writeBytes(blk, 0, blk.len)
+  tf.close()
+
+  let (valid, h, t) = splitBcfBoundaryBlock(tmpPath, 0, blk.len.int64)
+  removeFile(tmpPath)
+  doAssert not valid,
+    "splitBcfBoundaryBlock: single-record block should return valid=false"
+  doAssert h.len == 0, "head should be empty for invalid block"
+  doAssert t.len == 0, "tail should be empty for invalid block"
+  echo "PASS splitBcfBoundaryBlock zero-record block"
+
+# ---------------------------------------------------------------------------
+# Test: BGZF CRC32 field matches decompressed data
+# ---------------------------------------------------------------------------
+
+block testBgzfCrc32Validation:
+  doAssert fileExists(SmallVcf), "fixture missing"
+  # Find first non-EOF block.
+  let starts = scanBgzfBlockStarts(SmallVcf)
+  var testOff = -1'i64
+  for off in starts:
+    let hdr = readFileSlice(SmallVcf, off, 18)
+    let sz = bgzfBlockSize(hdr)
+    if sz != 28:   # 28 = EOF block size
+      testOff = off
+      break
+  doAssert testOff >= 0, "no non-EOF block found in " & SmallVcf
+
+  let hdr = readFileSlice(SmallVcf, testOff, 18)
+  let blkSize = bgzfBlockSize(hdr)
+  let blk = readFileSlice(SmallVcf, testOff, blkSize)
+
+  # CRC32 is stored at blk[blkSize-8 .. blkSize-5] (little-endian uint32).
+  let storedCrc = leU32At(blk, blkSize - 8)
+  let decompressed = decompressBgzf(blk)
+  let computedCrc = dataCrc32(decompressed)
+
+  doAssert storedCrc != 0, "stored CRC32 should be non-zero for real data"
+  doAssert storedCrc == computedCrc,
+    &"BGZF CRC32 mismatch: stored={storedCrc:#x} computed={computedCrc:#x}"
+  echo &"PASS BGZF CRC32 validation: stored CRC32 matches decompressed data ({blkSize} byte block)"
 
 echo ""
 echo "All bgzf_utils tests passed."

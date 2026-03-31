@@ -38,6 +38,25 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# tiny.vcf.gz — 10 records, used for unit-level splitChunk tests.
+# Small enough that all records fit in a single BGZF block.
+# ---------------------------------------------------------------------------
+TINY="${DATA_DIR}/tiny.vcf.gz"
+if [[ ! -f "${TINY}" ]]; then
+  echo "Generating ${TINY} ..."
+  {
+    write_header
+    for i in $(seq 1 10); do
+      printf "chr1\t%d\t.\tA\tT\t50\tPASS\tDP=10\tGT\t0/1\n" $((i * 1000))
+    done
+  } | bgzip -c > "${TINY}"
+  tabix -p vcf "${TINY}"
+  echo "  -> $(bcftools view -HG "${TINY}" | wc -l) records, TBI index: ${TINY}.tbi"
+else
+  echo "Skipping ${TINY} (already exists)"
+fi
+
+# ---------------------------------------------------------------------------
 # small.vcf.gz — 5000 records across chr1/chr2/chr3 with a substantial INFO
 # field so the uncompressed data exceeds 65536 bytes and spans multiple BGZF
 # blocks.  This is required for multi-shard scatter tests.
@@ -85,6 +104,20 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# small.bcf — BCF conversion of small.vcf.gz, CSI indexed.
+# BCF files always use CSI; bcftools index creates .bcf.csi by default.
+# ---------------------------------------------------------------------------
+SMALL_BCF="${DATA_DIR}/small.bcf"
+if [[ ! -f "${SMALL_BCF}" ]]; then
+  echo "Generating ${SMALL_BCF} ..."
+  bcftools view -Ob "${SMALL}" > "${SMALL_BCF}"
+  bcftools index "${SMALL_BCF}"
+  echo "  -> $(bcftools view -HG "${SMALL_BCF}" | wc -l) records, CSI index: ${SMALL_BCF}.csi"
+else
+  echo "Skipping ${SMALL_BCF} (already exists)"
+fi
+
+# ---------------------------------------------------------------------------
 # chr22_1kg.vcf.gz — real 1000 Genomes chr22 release (optional, ~1 GB)
 # Downloaded once; skipped if already present or if no network tool found.
 # ---------------------------------------------------------------------------
@@ -117,6 +150,24 @@ else
   echo "Skipping ${KG} (already exists)"
 fi
 
+# ---------------------------------------------------------------------------
+# chr22_1kg.bcf — BCF conversion of chr22_1kg.vcf.gz, CSI indexed.
+# Large header: 2504 samples.
+# ---------------------------------------------------------------------------
+KG_BCF="${DATA_DIR}/chr22_1kg.bcf"
+if [[ ! -f "${KG_BCF}" ]]; then
+  if [[ -f "${KG}" ]]; then
+    echo "Generating ${KG_BCF} ..."
+    bcftools view -Ob "${KG}" > "${KG_BCF}"
+    bcftools index "${KG_BCF}"
+    echo "  -> $(bcftools view -HG "${KG_BCF}" | wc -l) records, CSI index: ${KG_BCF}.csi"
+  else
+    echo "Skipping ${KG_BCF} (${KG} not present)"
+  fi
+else
+  echo "Skipping ${KG_BCF} (already exists)"
+fi
+
 echo ""
 echo "All fixtures ready in ${DATA_DIR}/"
-ls -lh "${DATA_DIR}"/*.vcf.gz "${DATA_DIR}"/*.tbi "${DATA_DIR}"/*.csi 2>/dev/null || true
+ls -lh "${DATA_DIR}"/*.vcf.gz "${DATA_DIR}"/*.bcf "${DATA_DIR}"/*.tbi "${DATA_DIR}"/*.csi 2>/dev/null || true

@@ -8,6 +8,7 @@ import "../src/paravar/run"
 
 const DataDir  = "tests/data"
 const SmallVcf = DataDir / "small.vcf.gz"
+const SmallBcf = DataDir / "small.bcf"
 
 # ---------------------------------------------------------------------------
 # R2 — parseRunArgv happy paths
@@ -85,6 +86,19 @@ proc countRecords(path: string): int =
   let (o, _) = execCmdEx("bcftools view -HG " & path & " 2>/dev/null | wc -l")
   o.strip.parseInt
 
+proc recordsHash(paths: seq[string]): string =
+  ## Concatenate records from paths in order (bcftools view -H, full genotypes),
+  ## write to temp file, return sha256sum hex digest.
+  let tmp = getTempDir() / "paravar_hash_" & $getCurrentProcessId() & ".txt"
+  var f = open(tmp, fmWrite)
+  for p in paths:
+    let (o, _) = execCmdEx("bcftools view -H " & p & " 2>/dev/null")
+    f.write(o)
+  f.close()
+  let (h, _) = execCmdEx("sha256sum " & tmp)
+  removeFile(tmp)
+  h.split(" ")[0]
+
 block testRunSingle1Shard:
   doAssert fileExists(SmallVcf), "fixture missing — run generate_fixtures.sh"
   let tmpDir = getTempDir() / "paravar_run_r3_1shard"
@@ -112,16 +126,20 @@ block testRun4Shards:
   let prefix = tmpDir / "out"
   runShards(SmallVcf, 4, prefix, 1, false, 4, "cat")
   var total = 0
+  var shardPaths: seq[string]
   for i in 1..4:
     let p = prefix & "." & $i & ".vcf.gz"
     doAssert fileExists(p), &"shard {i} missing"
     let (_, bc) = execCmdEx("bcftools view -HG " & p & " > /dev/null 2>&1")
     doAssert bc == 0, &"bcftools rejected shard {i}"
     total += countRecords(p)
+    shardPaths.add(p)
   let orig = countRecords(SmallVcf)
   doAssert total == orig, &"4-shard record count mismatch: {total} vs {orig}"
+  doAssert recordsHash(shardPaths) == recordsHash(@[SmallVcf]),
+    "4-shard content hash mismatch: record corruption or reordering detected"
   removeDir(tmpDir)
-  echo &"PASS runShards: 4 shards, --jobs 4, {total} records"
+  echo &"PASS runShards: 4 shards, --jobs 4, {total} records, content hash matches"
 
 block testRunJobs1Serial:
   doAssert fileExists(SmallVcf), "fixture missing"
@@ -276,6 +294,32 @@ block testCliRunDashDashPassthrough:
   doAssert countRecords(p) == countRecords(SmallVcf), "-- passthrough record count mismatch"
   removeDir(tmpDir)
   echo "PASS CLI run: -- inside stage passed through to bcftools"
+
+# ---------------------------------------------------------------------------
+# BCF run — 4 shards with bcftools view -Ob passthrough
+# ---------------------------------------------------------------------------
+
+block testBcfRun4Shards:
+  doAssert fileExists(SmallBcf), "BCF fixture missing — run generate_fixtures.sh"
+  let tmpDir = getTempDir() / "paravar_run_bcf_4shards"
+  createDir(tmpDir)
+  let prefix = tmpDir / "out"
+  runShards(SmallBcf, 4, prefix, 1, false, 4, "bcftools view -Ob")
+  var total = 0
+  var bcfShardPaths: seq[string]
+  for i in 1..4:
+    let p = prefix & "." & $i & ".bcf"
+    doAssert fileExists(p), &"BCF shard {i} missing: {p}"
+    let (_, bc) = execCmdEx("bcftools view -HG " & p & " > /dev/null 2>&1")
+    doAssert bc == 0, &"bcftools rejected BCF shard {i}"
+    total += countRecords(p)
+    bcfShardPaths.add(p)
+  let orig = countRecords(SmallBcf)
+  doAssert total == orig, &"BCF 4-shard record count mismatch: {total} vs {orig}"
+  doAssert recordsHash(bcfShardPaths) == recordsHash(@[SmallBcf]),
+    "BCF 4-shard content hash mismatch: record corruption or reordering detected"
+  removeDir(tmpDir)
+  echo &"PASS runShards BCF: 4 shards, bcftools view -Ob, {total} records, content hash matches"
 
 echo ""
 echo "All run R2/R3/R4/R5 tests passed."

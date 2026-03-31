@@ -9,10 +9,24 @@ const DataDir  = "tests/data"
 const SmallVcf = DataDir / "small.vcf.gz"       # TBI indexed
 const CsiVcf   = DataDir / "small_csi.vcf.gz"   # CSI indexed only
 const KgVcf    = DataDir / "chr22_1kg.vcf.gz"
+const SmallBcf = DataDir / "small.bcf"          # CSI indexed BCF
 
 proc run(args: string): (string, int) =
   ## Run paravar with shell args; combine stdout+stderr; return (outp, code).
   execCmdEx(BinPath & " " & args & " 2>&1")
+
+proc recordsHash(paths: seq[string]): string =
+  ## Concatenate records from paths in order (bcftools view -H, full genotypes),
+  ## write to temp file, return sha256sum hex digest.
+  let tmp = getTempDir() / "paravar_hash_" & $getCurrentProcessId() & ".txt"
+  var f = open(tmp, fmWrite)
+  for p in paths:
+    let (o, _) = execCmdEx("bcftools view -H " & p & " 2>/dev/null")
+    f.write(o)
+  f.close()
+  let (h, _) = execCmdEx("sha256sum " & tmp)
+  removeFile(tmp)
+  h.split(" ")[0]
 
 # ---------------------------------------------------------------------------
 # Build the binary before testing
@@ -129,22 +143,19 @@ block testEndToEnd:
     outp2.strip.parseInt
 
   var shardTotal = 0
+  var shardPaths: seq[string]
   for i in 1..4:
-    shardTotal += countRecords(prefix & "." & $i & ".vcf.gz")
+    let p = prefix & "." & $i & ".vcf.gz"
+    shardTotal += countRecords(p)
+    shardPaths.add(p)
   let origTotal = countRecords(SmallVcf)
   doAssert shardTotal == origTotal,
     &"e2e record count mismatch: shards={shardTotal} orig={origTotal}"
   echo &"PASS e2e: record count matches original ({origTotal} records across 4 shards)"
 
-  # Each shard must be sorted (bcftools checks coordinate order with -D).
-  for i in 1..4:
-    let shardPath = prefix & "." & $i & ".vcf.gz"
-    let (chkOutp, chkCode) = execCmdEx(
-      "bcftools view " & shardPath & " 2>&1 | bcftools sort --check-order - > /dev/null 2>&1")
-    # bcftools sort --check-order is not universally available; fall back to
-    # verifying the file is at least parseable (already checked above).
-    discard chkOutp; discard chkCode
-  echo "PASS e2e: shards are sorted (bcftools parseable)"
+  doAssert recordsHash(shardPaths) == recordsHash(@[SmallVcf]),
+    "e2e content hash mismatch: record corruption or reordering detected"
+  echo "PASS e2e: record content hash matches original (no corruption)"
 
   removeDir(tmpDir)
 
@@ -222,6 +233,90 @@ block testKg1000Genomes:
     echo &"PASS 1KG: record count matches original ({origTotal} records across 10 shards)"
 
     removeDir(tmpDir)
+
+# ---------------------------------------------------------------------------
+# BCF: .bcf extension → BCF mode (no error, shards have .bcf extension)
+# ---------------------------------------------------------------------------
+
+block testBcfExtension:
+  doAssert fileExists(SmallBcf), "BCF fixture missing — run generate_fixtures.sh"
+  let tmpDir = getTempDir() / "paravar_bcf_ext_test"
+  createDir(tmpDir)
+  let prefix = tmpDir / "shard"
+  let (outp, code) = run(&"scatter -n 4 -o {prefix} {SmallBcf}")
+  doAssert code == 0, &"BCF scatter exited non-zero:\n{outp}"
+  var bcfShardPaths: seq[string]
+  for i in 1..4:
+    let p = prefix & "." & $i & ".bcf"
+    doAssert fileExists(p), &"BCF shard {i} missing (.bcf extension): {p}"
+    let (bo, bc) = execCmdEx("bcftools view -HG " & p & " > /dev/null 2>&1")
+    doAssert bc == 0, &"bcftools rejected BCF shard {i}: {bo}"
+    bcfShardPaths.add(p)
+  doAssert recordsHash(bcfShardPaths) == recordsHash(@[SmallBcf]),
+    "BCF content hash mismatch: record corruption or reordering detected"
+  removeDir(tmpDir)
+  echo "PASS BCF .bcf extension → BCF mode, shards have .bcf extension, content hash matches"
+
+# ---------------------------------------------------------------------------
+# BCF: unknown extension → exits 1 with extension in message
+# ---------------------------------------------------------------------------
+
+block testUnknownExtension:
+  let tmpDir = getTempDir() / "paravar_unknown_ext_test"
+  createDir(tmpDir)
+  let tmpFile = tmpDir / "input.xyz"
+  writeFile(tmpFile, "dummy")
+  let (outp, code) = run(&"scatter -n 2 -o {tmpDir}/shard {tmpFile}")
+  doAssert code != 0, "unknown extension should exit non-zero"
+  doAssert ".xyz" in outp, &"error message should contain '.xyz', got: {outp}"
+  removeDir(tmpDir)
+  echo "PASS unknown extension exits 1 with extension in message"
+
+# ---------------------------------------------------------------------------
+# BCF: no index → exits 1 (BCF requires CSI; no auto-scan fallback)
+# ---------------------------------------------------------------------------
+
+block testBcfNoIndex:
+  doAssert fileExists(SmallBcf), "BCF fixture missing — run generate_fixtures.sh"
+  let tmpDir = getTempDir() / "paravar_bcf_noindex_test"
+  createDir(tmpDir)
+  let tmpBcf = tmpDir / "noindex.bcf"
+  copyFile(SmallBcf, tmpBcf)
+  # Intentionally omit .csi so BCF has no index.
+  let (outp, code) = run(&"scatter -n 2 -o {tmpDir}/shard {tmpBcf}")
+  doAssert code != 0, &"BCF with no index should exit non-zero, got {code}:\n{outp}"
+  removeDir(tmpDir)
+  echo "PASS BCF no index exits 1"
+
+# ---------------------------------------------------------------------------
+# BCF: --force-scan via run subcommand → exits 1
+# ---------------------------------------------------------------------------
+
+block testBcfRunForceScan:
+  doAssert fileExists(SmallBcf), "BCF fixture missing — run generate_fixtures.sh"
+  let tmpDir = getTempDir() / "paravar_bcf_run_forcescan_test"
+  createDir(tmpDir)
+  let (outp, code) = run(&"run -n 2 -o {tmpDir}/shard --force-scan {SmallBcf} --- cat")
+  doAssert code != 0, "--force-scan with BCF via run should exit non-zero"
+  doAssert "force-scan" in outp.toLowerAscii,
+    &"error should mention force-scan, got: {outp}"
+  removeDir(tmpDir)
+  echo "PASS BCF run --force-scan exits 1"
+
+# ---------------------------------------------------------------------------
+# BCF: --force-scan via scatter subcommand → exits 1 (not supported for BCF)
+# ---------------------------------------------------------------------------
+
+block testBcfForceScan:
+  doAssert fileExists(SmallBcf), "BCF fixture missing — run generate_fixtures.sh"
+  let tmpDir = getTempDir() / "paravar_bcf_forcescan_test"
+  createDir(tmpDir)
+  let (outp, code) = run(&"scatter -n 2 -o {tmpDir}/shard --force-scan {SmallBcf}")
+  doAssert code != 0, "--force-scan with BCF should exit non-zero"
+  doAssert "force-scan" in outp.toLowerAscii,
+    &"error should mention force-scan, got: {outp}"
+  removeDir(tmpDir)
+  echo "PASS BCF --force-scan exits 1"
 
 echo ""
 echo "All CLI tests passed."
