@@ -136,11 +136,11 @@ If `-o` is omitted or set to `/dev/stdout`, output is written to stdout uncompre
 | File | Responsibility |
 |------|----------------|
 | `src/paravar.nim` | Entry point (`include paravar/main`) |
-| `src/paravar/main.nim` | CLI arg parsing (`parseopt`), subcommand dispatch (`scatter`/`run`/`gather`) |
+| `src/paravar/main.nim` | CLI arg parsing (`parseopt`), subcommand dispatch (`scatter`/`run`/`gather`). `nextVal` supports attached short-flag values (e.g. `-j2`, `-n4`). |
 | `src/paravar/scatter.nim` | Scatter algorithm: index parsing, boundary optimisation, shard writing. Exports `computeShards`, `doWriteShard`, `shardOutputPath`. |
-| `src/paravar/bgzf_utils.nim` | Low-level BGZF I/O: scan blocks, decompress, compress, raw copy, boundary split, BCF record boundary split, virtual offset helpers. No external dependencies — only `-lz`. |
+| `src/paravar/bgzf_utils.nim` | Low-level BGZF I/O: scan blocks, decompress, compress, raw copy, boundary split, BCF record boundary split, virtual offset helpers. Vendored libdeflate (`vendor/libdeflate-1.25/`) statically linked. |
 | `src/paravar/run.nim` | `run` subcommand: `---`/`:::` argv parsing, shell command construction, `fork`/`exec` per shard, worker pool. Gather mode: spawns per-shard interceptor threads, calls `concatenateShards`. |
-| `src/paravar/gather.nim` | Gather module: types, format inference, sniffing, header stripping, `runInterceptor`, `concatenateShards`, `cleanupTempDir`, `gatherFiles` (direct-file gather for `gather` subcommand). |
+| `src/paravar/gather.nim` | Gather module: types, format inference, sniffing, header stripping; shared shard-writing helpers (`stripTrailingEof`, `writeShardZero`, `writeShardData`); `runInterceptor`, `concatenateShards`, `cleanupTempDir`, `gatherFiles` (direct-file gather for `gather` subcommand). |
 
 ### Scatter algorithm — VCF path (4 phases)
 
@@ -150,14 +150,14 @@ If a `.tbi` or `.csi` index exists alongside the input, it is parsed to extract 
 
 **Phase 2 — header extraction and first data block**
 
-Reads raw BGZF blocks from the start of the file, decompresses each, and collects all `#` lines until the first block containing a non-`#` data line. The collected bytes are recompressed via `compressToBgzfMulti`. No htslib dependency — pure file I/O and zlib.
+Reads raw BGZF blocks from the start of the file, decompresses each, and collects all `#` lines until the first block containing a non-`#` data line. The collected bytes are recompressed via `compressToBgzfMulti`. No htslib dependency — pure file I/O and libdeflate.
 
-**Phase 3 — shard boundary optimisation**
+**Phase 3 — shard boundary optimisation (single-pass)**
 
-1. Computes cumulative byte lengths and uses weighted bisection (`partitionBoundaries`) to pick `n-1` split points.
-2. For each candidate boundary block, calls `scanBgzfBlockStarts` to resolve finer sub-block offsets.
-3. Validates each boundary block by decompressing it and confirming a complete record line terminates before the next block. Invalid boundaries are excluded; up to 1000 iterations.
-4. Scanning and validation run in parallel when `--max-threads > 1`.
+1. Computes cumulative byte lengths and uses weighted bisection (`partitionBoundaries`) to pick `n-1` initial split points from the coarse index block list.
+2. For each candidate boundary block, calls `scanBgzfBlockStarts` to resolve finer BGZF sub-block offsets within that block's byte range. Runs in parallel when `--max-threads > 1`.
+3. Merges the discovered sub-blocks into the full block list and repartitions once.
+4. Validates each selected boundary block (decompresses, checks for a non-terminal newline). If a boundary is invalid (rare: would require a single VCF record > 65 KB uncompressed), the nearest valid neighbour in the enriched block list is used instead. If no valid neighbour exists, exits with an error.
 
 **Phase 4 — write shards**
 
@@ -222,7 +222,7 @@ shard_0N.out.vcf.gz ──┘
 
 ### No htslib dependency
 
-Header extraction uses a direct BGZF block scan that collects `#` lines until the first data line. Only zlib (`-lz`) is used.
+Header extraction uses a direct BGZF block scan that collects `#` lines until the first data line. The only C dependency is libdeflate (vendored, statically linked — no runtime `.so` required).
 
 ### Gather: BGZF EOF block stripping
 
@@ -252,6 +252,14 @@ For VCF and BCF formats, gather validates that the `#CHROM` line is identical ac
 - `extractChromLine(data: seq[byte]): string` — finds the first `#CHROM`-prefixed line in raw decompressed bytes.
 - `chromLineFromBytes(rawBytes, fmt, isBgzf): string` — decompresses only header-containing blocks, then calls `extractChromLine`.
 - `chromLineFromFile(path, fmt, isBgzf): string` — reads minimum BGZF blocks from a file to extract the `#CHROM` line (10 MB safety limit).
+
+### Gather: shared shard-writing helpers
+
+`runInterceptor` and `gatherFiles` share three helper procs extracted to eliminate duplication:
+
+- `stripTrailingEof(bytes)` — removes the 28-byte BGZF EOF block from the end of a buffer if present. Called before any shard write.
+- `writeShardZero(outFile, bytes, isBgzf, compression)` — writes shard 0 with no header stripping; handles the four recompression cases (BGZF↔uncompressed, pass-through).
+- `writeShardData(outFile, bytes, fmt, isBgzf, cfg)` — writes shards 1..N with header stripping and recompression. Contains both the optimised BGZF path (decompress only header blocks, raw-copy data blocks) and the general path (decompress all, strip, recompress).
 
 ### Gather: format detection race condition
 
@@ -313,6 +321,8 @@ bash tests/generate_fixtures.sh        # once
 
 export PATH="$HOME/.choosenim/toolchains/nim-2.2.8/bin:$PATH"
 
+nimble build                           # builds libdeflate (first run) + debug binary
+nimble release                         # release binary (-d:release)
 nimble test                            # all tests
 nim c -r tests/test_gather.nim        # single file
 ```
@@ -323,9 +333,11 @@ nim c -r tests/test_gather.nim        # single file
 
 | Dependency | Use |
 |-----------|-----|
-| zlib (`-lz`) | BGZF compress/decompress in `bgzf_utils.nim` |
+| libdeflate v1.25 | BGZF compress/decompress/CRC32 in `bgzf_utils.nim` |
 
-No nimble package dependencies. zlib is available system-wide or via conda.
+No nimble package dependencies. libdeflate is vendored in `vendor/libdeflate-1.25/` and built automatically by `nimble build` on first run (requires cmake). The resulting binary is statically linked — no runtime `.so` dependency.
+
+For offline/HPC use: place `vendor/libdeflate-1.25.tar.gz` in the repo before running `nimble build` to skip the download step.
 
 ---
 

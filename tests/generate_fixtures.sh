@@ -15,6 +15,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DATA_DIR="${SCRIPT_DIR}/data"
 mkdir -p "${DATA_DIR}"
 
+# Parse flags
+PERF=0
+for arg in "$@"; do
+  case "$arg" in
+    --perf) PERF=1 ;;
+    *) echo "Unknown argument: $arg"; exit 1 ;;
+  esac
+done
+
 # ---------------------------------------------------------------------------
 # Helper: write a minimal VCF header
 # ---------------------------------------------------------------------------
@@ -175,6 +184,37 @@ if [[ ! -f "${KG_BCF}" ]]; then
   fi
 else
   echo "Skipping ${KG_BCF} (already exists)"
+fi
+
+# ---------------------------------------------------------------------------
+# chr22_1kg_50k.vcf.gz — large perf fixture (--perf only)
+# 50,000 records from 1000 Genomes chr22, all 2504 samples, TBI indexed.
+# Used for benchmarking; not required for the standard test suite.
+# ---------------------------------------------------------------------------
+KG50K="${DATA_DIR}/chr22_1kg_50k.vcf.gz"
+KG50K_TBI="${KG50K}.tbi"
+KG50K_N_RECORDS=50000
+KG50K_AWK="/^#/{print; next} c<${KG50K_N_RECORDS}{print; c++} c>=${KG50K_N_RECORDS}{exit}"
+
+if [[ "${PERF}" -eq 1 ]]; then
+  if [[ ! -f "${KG50K}" ]]; then
+    if command -v wget &>/dev/null || command -v curl &>/dev/null; then
+      echo "Downloading ${KG50K} (first ${KG50K_N_RECORDS} records, all 2504 samples) ..."
+      set +o pipefail
+      if command -v wget &>/dev/null; then
+        wget -q -O - "${KG_VCF_URL}" | bgzip -d | awk "${KG50K_AWK}" | bgzip -c > "${KG50K}"
+      else
+        curl -s -L "${KG_VCF_URL}" | bgzip -d | awk "${KG50K_AWK}" | bgzip -c > "${KG50K}"
+      fi
+      set -o pipefail
+      tabix -p vcf "${KG50K}"
+      echo "  -> $(bcftools view -HG "${KG50K}" | wc -l) records, $(bcftools query -l "${KG50K}" | wc -l) samples, index: ${KG50K_TBI}"
+    else
+      echo "Skipping ${KG50K} (no wget or curl found)"
+    fi
+  else
+    echo "Skipping ${KG50K} (already exists)"
+  fi
 fi
 
 echo ""

@@ -9,9 +9,41 @@ bin         = @["paravar"]
 # Dependencies
 requires "nim >= 2.0.0"
 
+# ---------------------------------------------------------------------------
+# Vendored libdeflate
+# ---------------------------------------------------------------------------
+
+const LibdeflateVer = "1.25"
+const LibdeflateUrl = "https://github.com/ebiggers/libdeflate/archive/refs/tags/v" &
+                      LibdeflateVer & ".tar.gz"
+const LibdeflateDir = "vendor/libdeflate-" & LibdeflateVer
+const LibdeflateA   = LibdeflateDir & "/build/libdeflate.a"
+
+proc buildLibdeflate() =
+  if not fileExists(LibdeflateA):
+    mkDir "vendor"
+    let tarball = "vendor/libdeflate-" & LibdeflateVer & ".tar.gz"
+    if not fileExists(tarball):
+      exec "curl -fsSL " & LibdeflateUrl & " -o " & tarball
+    exec "tar -xz -C vendor -f " & tarball
+    exec "cmake -B " & LibdeflateDir & "/build -S " & LibdeflateDir &
+         " -DLIBDEFLATE_BUILD_SHARED_LIBS=OFF -DLIBDEFLATE_BUILD_GZIP=OFF" &
+         " -DCMAKE_BUILD_TYPE=Release"
+    exec "cmake --build " & LibdeflateDir & "/build --parallel"
+
+# ---------------------------------------------------------------------------
 # Tasks
+# ---------------------------------------------------------------------------
+
+before build:
+  buildLibdeflate()
+
+task release, "Build release binary":
+  buildLibdeflate()
+  exec "nim c -d:release src/paravar.nim"
+
 task test, "Run all tests":
-  exec "nimble build"   # build once; test files skip their own nimble build
+  exec "nimble build"   # triggers before build hook → buildLibdeflate + nim compile
   # Clear test nimcaches so source changes in imported modules are picked up.
   exec "rm -rf nimcache/tests"
   exec "testament pattern 'tests/test_*.nim'"

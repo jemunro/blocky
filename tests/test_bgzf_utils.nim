@@ -4,15 +4,15 @@
 import std/[os, strformat]
 import "../src/paravar/bgzf_utils"
 
-# zlib CRC32 — already linked via -lz in bgzf_utils
-proc zlibCrc32(crc: culong; buf: pointer; len: cuint): culong
-  {.importc: "crc32", header: "<zlib.h>".}
+# libdeflate CRC32 — already linked via -ldeflate in bgzf_utils
+proc libdeflateCrc32(crc: cuint; buf: pointer; len: csize_t): cuint
+  {.importc: "libdeflate_crc32", header: "<libdeflate.h>".}
 
 proc dataCrc32(data: seq[byte]): uint32 =
-  ## Compute CRC32 of data using zlib.
+  ## Compute CRC32 of data using libdeflate.
   if data.len == 0:
-    return zlibCrc32(0, nil, 0).uint32
-  zlibCrc32(0, data[0].unsafeAddr, data.len.cuint).uint32
+    return libdeflateCrc32(0'u32, nil, 0).uint32
+  libdeflateCrc32(0'u32, data[0].unsafeAddr, data.len.csize_t).uint32
 
 const DataDir  = "tests/data"
 const SmallVcf = DataDir / "small.vcf.gz"

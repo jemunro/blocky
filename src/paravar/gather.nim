@@ -356,7 +356,10 @@ proc writeShardData*(outFile: File; bytes: seq[byte]; fmt: GatherFormat;
     # Optimised path: decompress only the header-containing blocks, then
     # raw-copy (or decompress-and-write) the remaining data blocks.
     var blockPos = 0
-    var decompAccum: seq[byte]
+    # Pre-allocate for header decompression. Large-sample VCF headers (e.g.
+    # 2504 samples) decompress to several MB; 2 MB covers most cases and
+    # avoids repeated doubling reallocs while scanning for the header end.
+    var decompAccum = newSeqOfCap[byte](2 * 1024 * 1024)
     var headerEnd = -1
     while blockPos < bytes.len and headerEnd < 0:
       let blkSize = bgzfBlockSize(bytes.toOpenArray(blockPos, bytes.high))
@@ -438,12 +441,16 @@ proc runInterceptor*(cfg: GatherConfig; shardIdx: int; inputFd: cint; tmpPath: s
           &"but --gather expects {cfg.format}; proceeding"
 
     # Buffer the full stream (head + remainder).
-    var allBytes: seq[byte]
+    # Pre-allocate to avoid doubling reallocations and eliminate per-read
+    # slice temporaries from allBytes.add(buf[0..<got]).
+    var allBytes = newSeqOfCap[byte](4 * 1024 * 1024)
     allBytes.add(head)
     while true:
       let got = posix.read(inputFd, cast[pointer](addr buf[0]), ChunkSize)
       if got <= 0: break
-      allBytes.add(buf[0 ..< got])
+      let base = allBytes.len
+      allBytes.setLen(base + got)
+      copyMem(addr allBytes[base], addr buf[0], got)
 
     if shardIdx == 0:
       # Extract #CHROM line into the raw byte buffer, then release shards 1..N.

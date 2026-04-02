@@ -1,6 +1,6 @@
 ## bgzf_utils — low-level BGZF block parsing and I/O.
 ##
-## Only external dependency: system zlib (-lz), no htslib required.
+## Only external dependency: libdeflate (-ldeflate), no htslib required.
 ## All proc signatures use explicit types per project style guide.
 
 import std/[strformat]
@@ -24,54 +24,33 @@ const BGZF_OVERHEAD* = 26
 const BGZF_MAX_BLOCK_SIZE* = 65536
 
 # ---------------------------------------------------------------------------
-# zlib C FFI — deflate + inflate + crc32
+# libdeflate C FFI — deflate + inflate + crc32
 # ---------------------------------------------------------------------------
 
-{.passL: "-lz".}
+{.passC: "-I vendor/libdeflate-1.25".}
+{.passL: "vendor/libdeflate-1.25/build/libdeflate.a".}
 
-const Z_OK        = 0'i32
-const Z_STREAM_END = 1'i32
-const Z_FINISH    = 4'i32
-const Z_DEFLATED  = 8'i32
-const Z_DEFAULT_STRATEGY = 0'i32
+const LIBDEFLATE_SUCCESS = 0'i32
 
-type ZStream {.importc: "z_stream", header: "<zlib.h>".} = object
-  next_in:   ptr uint8
-  avail_in:  cuint
-  total_in:  culong
-  next_out:  ptr uint8
-  avail_out: cuint
-  total_out: culong
-  msg:       cstring
-  state:     pointer
-  zalloc:    pointer
-  zfree:     pointer
-  opaque:    pointer
-  data_type: cint
-  adler:     culong
-  reserved:  culong
-
-proc zlibVersion(): cstring
-  {.importc: "zlibVersion", header: "<zlib.h>".}
-
-proc cDeflateInit2(s: ptr ZStream; level, meth, windowBits,
-                   memLevel, strategy: cint; ver: cstring; ssize: cint): cint
-  {.importc: "deflateInit2_", header: "<zlib.h>".}
-proc cDeflate(s: ptr ZStream; flush: cint): cint
-  {.importc: "deflate", header: "<zlib.h>".}
-proc cDeflateEnd(s: ptr ZStream): cint
-  {.importc: "deflateEnd", header: "<zlib.h>".}
-
-proc cInflateInit2(s: ptr ZStream; windowBits: cint;
-                   ver: cstring; ssize: cint): cint
-  {.importc: "inflateInit2_", header: "<zlib.h>".}
-proc cInflate(s: ptr ZStream; flush: cint): cint
-  {.importc: "inflate", header: "<zlib.h>".}
-proc cInflateEnd(s: ptr ZStream): cint
-  {.importc: "inflateEnd", header: "<zlib.h>".}
-
-proc zlibCrc32(crc: culong; buf: ptr uint8; len: cuint): culong
-  {.importc: "crc32", header: "<zlib.h>".}
+proc libdeflateAllocCompressor(level: cint): pointer
+  {.importc: "libdeflate_alloc_compressor", header: "<libdeflate.h>".}
+proc libdeflateDeflateCompress(c: pointer; inBuf: pointer; inLen: csize_t;
+                               outBuf: pointer; outLen: csize_t): csize_t
+  {.importc: "libdeflate_deflate_compress", header: "<libdeflate.h>".}
+proc libdeflateDeflateCompressBound(c: pointer; inLen: csize_t): csize_t
+  {.importc: "libdeflate_deflate_compress_bound", header: "<libdeflate.h>".}
+proc libdeflateFreeCompressor(c: pointer)
+  {.importc: "libdeflate_free_compressor", header: "<libdeflate.h>".}
+proc libdeflateAllocDecompressor(): pointer
+  {.importc: "libdeflate_alloc_decompressor", header: "<libdeflate.h>".}
+proc libdeflateDeflateDecompress(d: pointer; inBuf: pointer; inLen: csize_t;
+                                 outBuf: pointer; outLen: csize_t;
+                                 actualOut: ptr csize_t): cint
+  {.importc: "libdeflate_deflate_decompress", header: "<libdeflate.h>".}
+proc libdeflateFreeDecompressor(d: pointer)
+  {.importc: "libdeflate_free_decompressor", header: "<libdeflate.h>".}
+proc libdeflateCrc32(crc: cuint; buf: pointer; len: csize_t): cuint
+  {.importc: "libdeflate_crc32", header: "<libdeflate.h>".}
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -103,16 +82,20 @@ proc bgzfBlockSize*(buf: openArray[byte]): int =
   ## Returns -1 if not a valid BGZF block.
   if buf.len < 18:
     return -1
-  if buf[0] != 0x1f or buf[1] != 0x8b or buf[2] != 0x08 or buf[3] != 0x04:
-    return -1
-  let xlen = leU16(buf, 10).int
-  var p = 12
-  while p + 4 <= 12 + xlen:
-    let slen = leU16(buf, p + 2).int
-    if buf[p] == 0x42 and buf[p + 1] == 0x43:  # 'B','C' subfield
-      return leU16(buf, p + 4).int + 1          # BSIZE - 1 + 1
-    p += 4 + slen
-  return -1
+  # buf.len >= 18 proven above; single push/pop to eliminate bounds checks
+  # on the remaining accesses (all within [0..17] for standard BGZF xlen=6).
+  {.push boundChecks: off.}
+  result = -1
+  if buf[0] == 0x1f and buf[1] == 0x8b and buf[2] == 0x08 and buf[3] == 0x04:
+    let xlen = leU16(buf, 10).int
+    var p = 12
+    while p + 4 <= 12 + xlen:
+      let slen = leU16(buf, p + 2).int
+      if buf[p] == 0x42 and buf[p + 1] == 0x43:  # 'B','C' subfield
+        result = leU16(buf, p + 4).int + 1        # BSIZE - 1 + 1
+        break
+      p += 4 + slen
+  {.pop.}
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -166,20 +149,18 @@ proc decompressBgzf*(data: openArray[byte]): seq[byte] =
   if isize == 0:
     return @[]
   result = newSeq[byte](isize)
-  var strm: ZStream
-  zeroMem(addr strm, sizeof(ZStream))
-  # windowBits = 47 (15+32): auto-detect gzip or zlib format.
-  if cInflateInit2(addr strm, 47'i32, zlibVersion(),
-                   sizeof(ZStream).cint) != Z_OK:
-    quit("decompressBgzf: inflateInit2 failed", 1)
-  strm.next_in   = unsafeAddr data[0]
-  strm.avail_in  = blkSize.cuint
-  strm.next_out  = addr result[0]
-  strm.avail_out = isize.cuint
-  let ret = cInflate(addr strm, Z_FINISH)
-  discard cInflateEnd(addr strm)
-  if ret != Z_STREAM_END:
-    quit(&"decompressBgzf: inflate returned {ret} (expected Z_STREAM_END)", 1)
+  let dcmp = libdeflateAllocDecompressor()
+  if dcmp == nil:
+    quit("decompressBgzf: alloc_decompressor returned nil", 1)
+  let compLen = blkSize - BGZF_OVERHEAD
+  let ret = libdeflateDeflateDecompress(
+    dcmp,
+    unsafeAddr data[18], compLen.csize_t,
+    addr result[0],      isize.csize_t,
+    nil)
+  libdeflateFreeDecompressor(dcmp)
+  if ret != LIBDEFLATE_SUCCESS:
+    quit(&"decompressBgzf: deflate_decompress returned {ret}", 1)
 
 proc decompressBgzfFile*(path: string): seq[byte] =
   ## Decompress an entire BGZF file into a single contiguous byte sequence.
@@ -205,30 +186,19 @@ proc compressToBgzf*(data: openArray[byte]; level: int = 6): seq[byte] =
   ## data.len must be <= BGZF_MAX_BLOCK_SIZE (65536).
   if data.len > BGZF_MAX_BLOCK_SIZE:
     quit(&"compressToBgzf: input too large ({data.len} > {BGZF_MAX_BLOCK_SIZE})", 1)
-  # Allocate worst-case compressed buffer (deflate expands incompressible data
-  # by at most a few bytes per 32 KiB; this bound is always safe).
-  var cdata = newSeq[byte](BGZF_MAX_BLOCK_SIZE + 64)
-  var strm: ZStream
-  zeroMem(addr strm, sizeof(ZStream))
-  # windowBits = -15: raw deflate (no gzip/zlib wrapper).
-  if cDeflateInit2(addr strm, level.cint, Z_DEFLATED, -15'i32, 8'i32,
-                   Z_DEFAULT_STRATEGY, zlibVersion(),
-                   sizeof(ZStream).cint) != Z_OK:
-    quit("compressToBgzf: deflateInit2 failed", 1)
-  if data.len > 0:
-    strm.next_in = unsafeAddr data[0]
-  strm.avail_in  = data.len.cuint
-  strm.next_out  = addr cdata[0]
-  strm.avail_out = cdata.len.cuint
-  let ret = cDeflate(addr strm, Z_FINISH)
-  discard cDeflateEnd(addr strm)
-  if ret != Z_STREAM_END:
-    quit(&"compressToBgzf: deflate returned {ret}", 1)
-  let cdataLen = strm.total_out.int
+  let cmp = libdeflateAllocCompressor(level.cint)
+  if cmp == nil:
+    quit("compressToBgzf: alloc_compressor returned nil", 1)
+  let bound = libdeflateDeflateCompressBound(cmp, data.len.csize_t).int
+  var cdata = newSeq[byte](bound)
+  let inPtr = if data.len > 0: unsafeAddr data[0] else: nil
+  let cdataLen = libdeflateDeflateCompress(
+    cmp, inPtr, data.len.csize_t, addr cdata[0], bound.csize_t).int
+  libdeflateFreeCompressor(cmp)
+  if cdataLen == 0:
+    quit("compressToBgzf: deflate_compress failed", 1)
   # Compute CRC32 of the original uncompressed data.
-  var crc = zlibCrc32(0, nil, 0)
-  if data.len > 0:
-    crc = zlibCrc32(crc, unsafeAddr data[0], data.len.cuint)
+  let crc = libdeflateCrc32(0'u32, inPtr, data.len.csize_t)
   # Build the BGZF block: 18-byte header + cdata + CRC32 + ISIZE.
   let totalSize = BGZF_OVERHEAD + cdataLen
   result = newSeq[byte](totalSize)
@@ -239,8 +209,7 @@ proc compressToBgzf*(data: openArray[byte]; level: int = 6): seq[byte] =
   result[12] = 0x42; result[13] = 0x43               # SI1='B', SI2='C'
   putLeU16(result, 14, 2'u16)                        # SLEN = 2
   putLeU16(result, 16, uint16(totalSize - 1))        # BSIZE - 1
-  for i in 0 ..< cdataLen:
-    result[18 + i] = cdata[i]
+  copyMem(addr result[18], addr cdata[0], cdataLen)
   putLeU32(result, 18 + cdataLen,     crc.uint32)    # CRC32
   putLeU32(result, 18 + cdataLen + 4, data.len.uint32)  # ISIZE
 

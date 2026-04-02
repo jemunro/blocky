@@ -1,6 +1,6 @@
 [
-{"name":"tests/test_bgzf_utils.nim c","category":"pattern","target":"c","action":"run","result":"reSuccess","expected":"","given":"","machine":"slurm-login03.hpc.wehi.edu.au","commit":"ffdceffd956","branch":"main"},
-{"name":"tests/test_cli.nim c","category":"pattern","target":"c","action":"run","result":"reSuccess","expected":"","given":"","machine":"slurm-login03.hpc.wehi.edu.au","commit":"ffdceffd956","branch":"main"},
-{"name":"tests/test_gather.nim c","category":"pattern","target":"c","action":"run","result":"reSuccess","expected":"","given":"","machine":"slurm-login03.hpc.wehi.edu.au","commit":"ffdceffd956","branch":"main"},
-{"name":"tests/test_run.nim c","category":"pattern","target":"c","action":"run","result":"reSuccess","expected":"","given":"","machine":"slurm-login03.hpc.wehi.edu.au","commit":"ffdceffd956","branch":"main"},
-{"name":"tests/test_scatter.nim c","category":"pattern","target":"c","action":"run","result":"reSuccess","expected":"","given":"","machine":"slurm-login03.hpc.wehi.edu.au","commit":"ffdceffd956","branch":"main"}]
+{"name":"tests/test_bgzf_utils.nim c","category":"pattern","target":"c","action":"run","result":"reSuccess","expected":"","given":"","machine":"slurm-login03.hpc.wehi.edu.au","commit":"c069b064dec","branch":"main"},
+{"name":"tests/test_cli.nim c","category":"pattern","target":"c","action":"run","result":"reSuccess","expected":"","given":"","machine":"slurm-login03.hpc.wehi.edu.au","commit":"c069b064dec","branch":"main"},
+{"name":"tests/test_gather.nim c","category":"pattern","target":"c","action":"run","result":"reSuccess","expected":"","given":"","machine":"slurm-login03.hpc.wehi.edu.au","commit":"c069b064dec","branch":"main"},
+{"name":"tests/test_run.nim c","category":"pattern","target":"c","action":"run","result":"reSuccess","expected":"","given":"","machine":"slurm-login03.hpc.wehi.edu.au","commit":"c069b064dec","branch":"main"},
+{"name":"tests/test_scatter.nim c","category":"pattern","target":"c","action":"run","result":"reSuccess","expected":"","given":"","machine":"slurm-login03.hpc.wehi.edu.au","commit":"c069b064dec","branch":"main"}]

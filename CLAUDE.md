@@ -223,17 +223,15 @@ For BGZF streams: decompress first block to check. Detected format stored global
 
 ### Header validation (`#CHROM` line check)
 
-For VCF and BCF, before writing any output, paravar checks that the `#CHROM` line (the tab-separated sample column header) is byte-for-byte identical across all shards. This catches pipelines that reorder or add/remove samples.
+For VCF and BCF, gather validates the `#CHROM` line is byte-for-byte identical across all shards before writing any output.
 
-**For `run --gather`**: the `#CHROM` line is extracted from shard 0's intercepted stream and stored. Each subsequent shard's interceptor extracts and compares before writing any data. On mismatch: exit 1 with a message identifying which shard failed and showing the differing lines. Kill all in-flight shard pipelines (respects `--no-kill`). Temp files left on disk.
+**`run --gather`**: shard 0's interceptor extracts the `#CHROM` line via `chromLineFromBytes` after sniffing the format. Stored in GC-safe globals `gChromLineBuf` + `gChromLineLen` (not a `string`, which would fail the `spawn` GC-safety check). `gFormatDetected = true` is set after these globals are populated so shards 1..N see both atomically. On mismatch: exit 1, kill siblings (respects `--no-kill`), leave temp files on disk.
 
-**For `gather`**: extract the `#CHROM` line from each input file's header before concatenating anything. On first mismatch: exit 1 immediately with the differing shard path and lines. No partial output is written.
+**`gather` subcommand (two-phase)**: Phase 1 reads shard 0, detects format, calls `chromLineFromFile` for each remaining shard — reads only enough BGZF blocks to locate the `#CHROM` line. Any mismatch calls `quit(1)` before the output file is opened (no partial output). Phase 2 opens output and writes.
 
-**For text format**: no header check — text gather is format-agnostic.
+**Text format**: no header check.
 
-**VCF**: `#CHROM` line is the last `#`-prefixed line before data records. Extract from the decompressed header region.
-
-**BCF**: `#CHROM` line is embedded in the `l_text` header blob. Extract by scanning the text for the line beginning with `#CHROM`.
+**New procs**: `extractChromLine(data: seq[byte]): string`, `chromLineFromBytes(rawBytes, fmt, isBgzf): string`, `chromLineFromFile(path, fmt, isBgzf): string` (10 MB safety limit).
 
 ### Recompression
 
@@ -250,11 +248,7 @@ Each shard stream ends with a BGZF EOF block (28 bytes). Every interceptor/reade
 
 ### Stdout output
 
-When `-o` is omitted or is `/dev/stdout`, the gather output is written to stdout. Format inference still applies — infer from `/dev/stdout` is not meaningful, so when writing to stdout:
-- Format and compression default to **uncompressed text** unless the sniffed shard format is VCF or BCF, in which case format matches the sniffed format with **no compression** (uncompressed VCF or uncompressed BCF stream)
-- If the user wants a specific compressed format on stdout they should pipe: `paravar gather ... | bgzip -c > out.vcf.gz`
-
-For `run --gather` writing to stdout: shard 0 writes directly to stdout fd. Shards 1..N still use temp files; `concatenateShards` writes them to stdout after all complete.
+`-o` is optional for both `gather` and `run --gather`. If omitted or set to `/dev/stdout`, `GatherConfig.toStdout = true` and output is written to stdout directly. Format compression defaults to `gcUncompressed` for stdout. The format-mismatch warning is suppressed for stdout mode. For `run --gather`: shard 0 writes directly to stdout fd; shards 1..N still use temp files; `concatenateShards` writes them to stdout after all complete.
 
 ### Concatenation
 
@@ -275,7 +269,7 @@ For `gather` subcommand (operating on existing files): same logic, no temp files
 | `src/paravar.nim` | Entry point |
 | `src/paravar/main.nim` | CLI parsing, subcommand dispatch |
 | `src/paravar/scatter.nim` | Scatter algorithm (VCF + BCF) |
-| `src/paravar/bgzf_utils.nim` | Low-level BGZF I/O, no external deps beyond `-lz` |
+| `src/paravar/bgzf_utils.nim` | Low-level BGZF I/O; vendored libdeflate (`vendor/libdeflate-1.25/`) statically linked |
 | `src/paravar/run.nim` | Run mode: pipeline spawning, worker pool, interceptor coordination |
 | `src/paravar/gather.nim` | Types, format inference, sniffing, stripping, interceptor thread, concatenation |
 
@@ -289,9 +283,9 @@ Execute in order. Do not skip ahead. Update checkboxes as steps complete.
 - [x] R0: reverted C1 partial implementation
 - [x] C1–C6: subcommands, naming scheme, `:::` separator, `gather` subcommand, test updates
 
-### Stdout + header validation (current milestone)
-- [ ] **Step S1**: Implement stdout output for `run --gather` and `gather`: handle omitted `-o` and `/dev/stdout` as stdout fd. Format on stdout is uncompressed matching sniffed format. Write tests for stdout path (omitted `-o`, explicit `/dev/stdout`). Run `nimble test`.
-- [ ] **Step S2**: Implement `#CHROM` header validation in `gather.nim`: `extractChromLine` for VCF and BCF, byte-for-byte comparison, early-exit on mismatch for both `run --gather` (interceptor) and `gather` (pre-scan all files before writing). Write tests covering match, mismatch (hard error), and text format (no check). Run `nimble test` — full suite green.
+### Stdout + header validation (complete)
+- [x] S1: stdout output for `run --gather` and `gather` (omitted `-o` and `/dev/stdout`)
+- [x] S2: `#CHROM` line validation — byte-for-byte check, early exit on mismatch
 
 ---
 
@@ -307,7 +301,7 @@ Execute in order. Do not skip ahead. Update checkboxes as steps complete.
 
 | Rule | Detail |
 |---|---|
-| **No new dependencies** | Do not add to `paravar.nimble` without asking |
+| **No new dependencies** | Do not add Nim packages to `paravar.nimble` or new vendored C libs without asking |
 | **Test before done** | Run `nimble test` and show full output before declaring any step complete |
 | **No commits** | Stage changes, propose commit message, wait for user |
 | **No layout changes** | Do not restructure modules without asking |
@@ -316,13 +310,92 @@ Execute in order. Do not skip ahead. Update checkboxes as steps complete.
 
 ---
 
+## Performance testing
+
+Performance tests are **not run by default** — only when explicitly requested. They require a large fixture not used in the standard test suite.
+
+### Large fixture
+
+`tests/generate_fixtures.sh` accepts an optional `--perf` flag that downloads an additional fixture:
+
+| File | Description |
+|------|-------------|
+| `tests/data/chr22_1kg_50k.vcf.gz` | 50,000 records, all 2504 samples from 1000 Genomes chr22, TBI indexed |
+
+Download command (run once):
+```bash
+bash tests/generate_fixtures.sh --perf
+```
+
+### Benchmark command
+
+The canonical benchmark is:
+```bash
+time paravar run -n 8 -j 4 --gather -o out.vcf.gz tests/data/chr22_1kg_full.vcf.gz   ::: bcftools view -Oz
+```
+
+Compare against single-threaded baseline:
+```bash
+time bcftools view -Oz -o out_baseline.vcf.gz tests/data/chr22_1kg_full.vcf.gz
+```
+
+And verify output correctness after benchmarking:
+```bash
+bcftools view -H out.vcf.gz | sha256sum
+bcftools view -H out_baseline.vcf.gz | sha256sum
+# hashes must match
+```
+
+### Profiling with perf
+
+For identifying bottlenecks, build with debug symbols and use Linux perf:
+```bash
+nim c -d:release -g src/paravar.nim
+
+# Record
+perf record -g ./paravar run -n 8 -j 4 --gather -o out.vcf.gz   tests/data/chr22_1kg_full.vcf.gz ::: bcftools view -Oz
+
+# Interactive report
+perf report
+
+# Flamegraph (requires FlameGraph scripts on PATH)
+perf script | stackcollapse-perf.pl | flamegraph.pl > flame.svg
+```
+
+Nim's built-in profiler is also available for a quick overview:
+```bash
+nim c -d:release --profiler:on --stackTrace:on src/paravar.nim
+./paravar run -n 8 -j 4 --gather -o out.vcf.gz   tests/data/chr22_1kg_full.vcf.gz ::: bcftools view -Oz
+# writes profile.json to cwd
+```
+
+### What to look for
+
+Expected hot spots in order of likelihood:
+- **libdeflate compression** (`compressToBgzf`, `decompressBgzf`) — boundary block recompression
+- **File I/O** — middle block copying; should be near disk bandwidth
+- **Thread synchronisation** — interceptor spin-wait; should be negligible
+- **Boundary optimisation** — should be fast; if slow, check for O(n²) regression
+
+---
+
 ## Build reference
 
+`nimble build` and `nimble release` both use a `before build:` hook to build the vendored libdeflate (v1.25) via cmake on first run; subsequent runs skip cmake (checks for `vendor/libdeflate-1.25/build/libdeflate.a`). The binary is statically linked — no runtime `.so` dependency.
+
+For offline/HPC use: place the tarball at `vendor/libdeflate-1.25.tar.gz` before building; the hook will skip the download and extract from the local file.
+
 ```bash
-nimble build
-nimble build -d:release
-nimble test
-nim c -d:debug -r tests/test_gather.nim
+nimble build          # debug build (first run downloads + cmake-builds libdeflate)
+nimble release        # release build (-d:release)
+nimble test           # debug build + run all 5 test suites
+nim c -d:debug -r tests/test_gather.nim   # run one test file directly
+```
+
+### Profiling build
+
+```bash
+nim c -d:release -g src/paravar.nim
 ```
 
 ### BGZF EOF block constant
