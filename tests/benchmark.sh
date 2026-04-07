@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# benchmark.sh — paravar performance grid: j={2,4} × n={4,8} × input={vcf,bcf} × output={vcf,bcf}
+# benchmark.sh — vcfparty performance grid: j={2,4} × n={4,8} × input={vcf,bcf} × output={vcf,bcf}
 #
 # Usage:
-#   bash tests/benchmark.sh [--fixture <vcf.gz>] [--binary <paravar>]
+#   bash tests/benchmark.sh [--fixture <vcf.gz>] [--binary <vcfparty>]
 #
 # Defaults:
 #   --fixture  tests/data/chr22_1kg_50k.vcf.gz
-#   --binary   ./paravar
+#   --binary   ./vcfparty
 #
-# Prerequisites: bcftools, paravar binary, fixture + TBI index.
+# Prerequisites: bcftools, vcfparty binary, fixture + TBI index.
 # The BCF version of the fixture is created automatically if absent.
 
 set -euo pipefail
@@ -20,8 +20,8 @@ ROOT_DIR="$(dirname "${SCRIPT_DIR}")"
 # Defaults
 # ---------------------------------------------------------------------------
 FIXTURE="${SCRIPT_DIR}/data/chr22_1kg_50k.vcf.gz"
-BINARY="${ROOT_DIR}/paravar"
-TMPDIR_BASE="${TMPDIR:-/tmp}/paravar_bench"
+BINARY="${ROOT_DIR}/vcfparty"
+TMPDIR_BASE="${TMPDIR:-/tmp}/vcfparty_bench"
 
 # ---------------------------------------------------------------------------
 # Arg parsing
@@ -61,7 +61,7 @@ mkdir -p "${TMPDIR_BASE}"
 
 # ---------------------------------------------------------------------------
 # Helper: time one command, write elapsed seconds to stdout
-# Uses a temp file so that any stderr from the command (e.g. paravar
+# Uses a temp file so that any stderr from the command (e.g. vcfparty
 # format-mismatch warnings) does not contaminate the captured time value.
 # ---------------------------------------------------------------------------
 run_time() {
@@ -81,7 +81,7 @@ FIXTURE_SIZE=$(du -sh "${FIXTURE}" | cut -f1)
 FIXTURE_BCF_SIZE=$(du -sh "${FIXTURE_BCF}" | cut -f1)
 
 echo "================================================================"
-echo "paravar benchmark"
+echo "vcfparty benchmark"
 printf "  binary:  %s\n" "${BINARY}"
 printf "  fixture: %s  (%s, %d records, %d samples)\n" \
   "${FIXTURE}" "${FIXTURE_SIZE}" "${FIXTURE_NREC}" "${FIXTURE_NSAM}"
@@ -108,7 +108,7 @@ OUTPUT_EXT[vcf]="vcf.gz"
 OUTPUT_EXT[bcf]="bcf"
 
 # ---------------------------------------------------------------------------
-# Phase 1: baselines (bcftools only, no paravar)
+# Phase 1: baselines (bcftools only, no vcfparty)
 # ---------------------------------------------------------------------------
 echo "--- Baselines (bcftools view, single-threaded) ---"
 printf "%-6s  %-6s  %-8s  %s\n" "input" "output" "time(s)" "cmd"
@@ -135,9 +135,9 @@ done
 echo ""
 
 # ---------------------------------------------------------------------------
-# Phase 2: paravar grid
+# Phase 2: vcfparty grid
 # ---------------------------------------------------------------------------
-echo "--- paravar grid ---"
+echo "--- vcfparty grid ---"
 printf "%-6s  %-6s  %4s  %4s  %-8s  %-8s  %s\n" \
   "input" "output" "n" "j" "time(s)" "speedup" "status"
 

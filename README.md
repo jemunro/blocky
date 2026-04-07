@@ -1,4 +1,4 @@
-# paravar
+# vcfparty
 
 Parallelise VCF/BCF processing by splitting files along BGZF block boundaries and piping each shard through a tool pipeline concurrently.
 
@@ -8,7 +8,7 @@ Parallelise VCF/BCF processing by splitting files along BGZF block boundaries an
 
 A bgzipped VCF or BCF is a sequence of independent BGZF blocks, each containing up to 64 KiB of uncompressed data. Because blocks are self-contained, any block boundary is a valid split point — the file can be divided into shards without decompressing the data in between.
 
-paravar uses the tabix (TBI) or CSI index to obtain coarse block offsets, then refines those to exact BGZF block boundaries within a small byte window around each split point. Each shard receives a recompressed header and a recompressed boundary block; the blocks in between are byte-copied directly from disk without decompression.
+vcfparty uses the tabix (TBI) or CSI index to obtain coarse block offsets, then refines those to exact BGZF block boundaries within a small byte window around each split point. Each shard receives a recompressed header and a recompressed boundary block; the blocks in between are byte-copied directly from disk without decompression.
 
 Only one block per split point is ever decompressed and recompressed. For a file split into N shards, that is N−1 boundary blocks regardless of file size.
 
@@ -18,8 +18,8 @@ Only one block per split point is ever decompressed and recompressed. For a file
 
 ```bash
 # Requires Nim >= 2.0 and cmake (used once to build the vendored compression library)
-git clone https://github.com/jemunro/paravar paravar
-cd paravar
+git clone https://github.com/jemunro/vcfparty vcfparty
+cd vcfparty
 nimble release
 ```
 
@@ -33,18 +33,18 @@ For offline or HPC use, place `vendor/libdeflate-1.25.tar.gz` in the repo before
 
 ```bash
 # Split a VCF into 8 shards
-paravar scatter -n 8 -o output.vcf.gz input.vcf.gz
+vcfparty scatter -n 8 -o output.vcf.gz input.vcf.gz
 
 # Filter in parallel, keep per-shard outputs
-paravar run -n 8 -o filtered.vcf.gz input.vcf.gz \
+vcfparty run -n 8 -o filtered.vcf.gz input.vcf.gz \
   ::: bcftools view -i "GT='alt'" -Oz
 
 # Filter and gather into a single file
-paravar run --gather -n 8 -o filtered.vcf.gz input.vcf.gz \
+vcfparty run --gather -n 8 -o filtered.vcf.gz input.vcf.gz \
   ::: bcftools view -i "GT='alt'" -Oz
 
 # Tool-managed: tool writes per-shard files using {} in the command
-paravar run -n 8 input.vcf.gz \
+vcfparty run -n 8 input.vcf.gz \
   ::: bcftools view -i "GT='alt'" -Oz -o output.{}.vcf.gz
 ```
 
@@ -57,7 +57,7 @@ paravar run -n 8 input.vcf.gz \
 Split input into N shards. Each shard is a valid standalone VCF/BCF file.
 
 ```
-paravar scatter -n <n> -o <o> [options] <input>
+vcfparty scatter -n <n> -o <o> [options] <input>
 ```
 
 | Flag | Long form | Description |
@@ -71,11 +71,11 @@ paravar scatter -n <n> -o <o> [options] <input>
 
 ```bash
 # Scatter into 4 shards using the {} placeholder
-paravar scatter -n 4 -o output.{}.vcf.gz input.vcf.gz
+vcfparty scatter -n 4 -o output.{}.vcf.gz input.vcf.gz
 # → output.1.vcf.gz  output.2.vcf.gz  output.3.vcf.gz  output.4.vcf.gz
 
 # BCF requires a CSI index
-paravar scatter -n 4 -o output.bcf input.bcf
+vcfparty scatter -n 4 -o output.bcf input.bcf
 ```
 
 BCF input requires a `.csi` index alongside the file (`bcftools index input.bcf`). VCF input uses a TBI or CSI index if present; if no index is found, all BGZF blocks are scanned directly and a warning is printed. Use `--force-scan` to force this path explicitly.
@@ -87,7 +87,7 @@ BCF input requires a `.csi` index alongside the file (`bcftools index input.bcf`
 Scatter and pipe each shard through a tool pipeline in parallel. Without `--gather`, writes N per-shard output files. `-o` is optional when `{}` appears in the tool command (tool-managed mode — see below).
 
 ```
-paravar run -n <n> [-o <o>] [options] <input> ::: <cmd> [::: <cmd> ...]
+vcfparty run -n <n> [-o <o>] [options] <input> ::: <cmd> [::: <cmd> ...]
 ```
 
 | Flag | Long form | Description |
@@ -103,7 +103,7 @@ paravar run -n <n> [-o <o>] [options] <input> ::: <cmd> [::: <cmd> ...]
 
 ```bash
 # 8 shards, at most 4 concurrent pipelines
-paravar run -n 8 -j 4 -o filtered.vcf.gz input.vcf.gz \
+vcfparty run -n 8 -j 4 -o filtered.vcf.gz input.vcf.gz \
   ::: bcftools view -i "GT='alt'" -Oz
 ```
 
@@ -114,7 +114,7 @@ paravar run -n 8 -j 4 -o filtered.vcf.gz input.vcf.gz \
 As `run`, but intercept each shard's stdout, strip duplicate headers from shards 2..N, and concatenate all outputs into a single file.
 
 ```
-paravar run --gather [-o <o>] -n <n> [options] <input> ::: <cmd> [::: <cmd> ...]
+vcfparty run --gather [-o <o>] -n <n> [options] <input> ::: <cmd> [::: <cmd> ...]
 ```
 
 In addition to the `run` flags:
@@ -122,7 +122,7 @@ In addition to the `run` flags:
 | Flag | Long form | Description |
 |---|---|---|
 | | `--gather` | Bare flag. Gather all shard outputs into single `-o` file |
-| | `--tmp-dir <dir>` | Temp dir for gather (default: `$TMPDIR/paravar` or `/tmp/paravar`) |
+| | `--tmp-dir <dir>` | Temp dir for gather (default: `$TMPDIR/vcfparty` or `/tmp/vcfparty`) |
 | | `--header-pattern <pat>` | Strip lines with this prefix from shards 2..N — **text format only**; error if specified with VCF or BCF |
 | | `--header-n <n>` | Strip first N lines from shards 2..N — **text format only**; error if specified with VCF or BCF |
 
@@ -130,11 +130,11 @@ In addition to the `run` flags:
 
 ```bash
 # Gather into a single BCF
-paravar run --gather -n 8 -o filtered.bcf input.bcf \
+vcfparty run --gather -n 8 -o filtered.bcf input.bcf \
   ::: bcftools view -i "GT='alt'" -Ob
 
 # Write to stdout
-paravar run --gather -n 8 input.vcf.gz \
+vcfparty run --gather -n 8 input.vcf.gz \
   ::: bcftools view -i "GT='alt'" -Oz | bcftools stats
 ```
 
@@ -145,7 +145,7 @@ paravar run --gather -n 8 input.vcf.gz \
 Concatenate pre-existing shard files (output of `scatter` or `run`) into a single file. No temp files — reads directly from input files.
 
 ```
-paravar gather [-o <o>] [options] <shard1> [<shard2> ...]
+vcfparty gather [-o <o>] [options] <shard1> [<shard2> ...]
 ```
 
 | Flag | Long form | Description |
@@ -159,10 +159,10 @@ paravar gather [-o <o>] [options] <shard1> [<shard2> ...]
 `--header-pattern` and `--header-n` are mutually exclusive.
 
 ```bash
-paravar gather -o merged.vcf.gz shard_*.vcf.gz
+vcfparty gather -o merged.vcf.gz shard_*.vcf.gz
 
 # Stdout (pipe to bcftools)
-paravar gather shard_*.vcf.gz | bcftools stats > stats.txt
+vcfparty gather shard_*.vcf.gz | bcftools stats > stats.txt
 ```
 
 ---
@@ -194,28 +194,28 @@ Parent directories are created automatically. With `--gather`, `-o` is the final
 
 ## Tool-managed output
 
-When `{}` appears in the tool command, paravar substitutes it with the zero-padded shard number in each per-shard pipeline invocation. If `-o` is absent, paravar enters tool-managed output mode: shard stdout is discarded and the tool is expected to write its own files using `{}`.
+When `{}` appears in the tool command, vcfparty substitutes it with the zero-padded shard number in each per-shard pipeline invocation. If `-o` is absent, vcfparty enters tool-managed output mode: shard stdout is discarded and the tool is expected to write its own files using `{}`.
 
 ```bash
 # Tool writes output.01.vcf.gz ... output.08.vcf.gz
-paravar run -n 8 input.vcf.gz \
+vcfparty run -n 8 input.vcf.gz \
   ::: bcftools view -Oz -o output.{}.vcf.gz
 
 # Multi-stage: {} only needed in the stage that writes the file
-paravar run -n 8 input.vcf.gz \
+vcfparty run -n 8 input.vcf.gz \
   ::: bcftools view -i "GT='alt'" -Ou \
   ::: bcftools view -s Sample -Oz -o filtered.{}.vcf.gz
 ```
 
 `{}` substitution also applies in normal (`-o`) and gather modes — the shard number is replaced in every tool command token that contains `{}`.
 
-To pass a literal `{}` to a tool without substitution, escape it as `\{}` (use single quotes in the shell: `'\{}'`). The backslash is consumed by paravar; the tool receives `{}`.
+To pass a literal `{}` to a tool without substitution, escape it as `\{}` (use single quotes in the shell: `'\{}'`). The backslash is consumed by vcfparty; the tool receives `{}`.
 
 | `-o` present | `{}` in tool cmd | `--gather` | Mode |
 |---|---|---|---|
 | No | No | Yes | Gather → stdout |
 | Yes | No | Yes | Gather → `-o` file |
-| Yes | No | No | Normal — paravar writes shard files |
+| Yes | No | No | Normal — vcfparty writes shard files |
 | No | Yes | No | Tool-managed — tool writes its own files |
 | No | No | No | Error |
 
@@ -231,7 +231,7 @@ Both are chosen to avoid collision with tools (such as bcftools plugins) that us
 
 ```bash
 # Multi-stage pipeline
-paravar run -n 8 -o out.vcf.gz input.vcf.gz \
+vcfparty run -n 8 -o out.vcf.gz input.vcf.gz \
   ::: bcftools view -i "GT='alt'" -Ou \
   ::: bcftools view -s Sample -Oz
 ```
@@ -269,34 +269,34 @@ Any extension not matching VCF or BCF is treated as text. When `-o` is omitted o
 
 ```bash
 # Multi-stage pipeline: filter then annotate
-paravar run --gather -n 8 -o annotated.bcf input.vcf.gz \
+vcfparty run --gather -n 8 -o annotated.bcf input.vcf.gz \
   ::: bcftools view -i "GT='alt'" -Ou \
   ::: bcftools +fill-tags -Ob -- -t AF,AC
 
 # VEP annotation in parallel
-paravar run --gather -n 8 -o annotated.vcf.gz input.vcf.gz \
+vcfparty run --gather -n 8 -o annotated.vcf.gz input.vcf.gz \
   ::: vep --format vcf --vcf --cache --offline --no_stats -o stdout
 
 # bcftools query to text
-paravar run --gather -n 8 -o variants.txt input.vcf.gz \
+vcfparty run --gather -n 8 -o variants.txt input.vcf.gz \
   ::: bcftools query -f '%CHROM\t%POS\t%REF\t%ALT\n'
 
 # Pipe gather output to stdout
-paravar gather shard_*.vcf.gz | bcftools stats > stats.txt
+vcfparty gather shard_*.vcf.gz | bcftools stats > stats.txt
 
 # Per-shard output directories (created automatically)
-paravar run -n 8 -o /results/{}/out.vcf.gz input.vcf.gz \
+vcfparty run -n 8 -o /results/{}/out.vcf.gz input.vcf.gz \
   ::: bcftools view -i "GT='alt'" -Oz
 
 # Limit concurrency on a shared node: 32 shards, 8 at a time
-paravar run --gather -n 32 -j 8 -o filtered.bcf input.bcf \
+vcfparty run --gather -n 32 -j 8 -o filtered.bcf input.bcf \
   ::: bcftools view -i "GT='alt'" -Ob
 
 # BCF scatter with CSI index
-paravar scatter -n 4 -o output.bcf input.bcf
+vcfparty scatter -n 4 -o output.bcf input.bcf
 
-# Tool-managed: bcftools writes per-shard files, paravar discards stdout
-paravar run -n 8 input.vcf.gz \
+# Tool-managed: bcftools writes per-shard files, vcfparty discards stdout
+vcfparty run -n 8 input.vcf.gz \
   ::: bcftools view -i "GT='alt'" -Oz -o filtered.{}.vcf.gz
 ```
 
@@ -304,7 +304,7 @@ paravar run -n 8 input.vcf.gz \
 
 ## Header validation
 
-When gathering VCF or BCF output, paravar checks that the `#CHROM` line (the sample column header) is byte-for-byte identical across all shards before writing any output. A mismatch exits with code 1 and no partial output is written. This catches cases where shards were inadvertently produced from different sample sets.
+When gathering VCF or BCF output, vcfparty checks that the `#CHROM` line (the sample column header) is byte-for-byte identical across all shards before writing any output. A mismatch exits with code 1 and no partial output is written. This catches cases where shards were inadvertently produced from different sample sets.
 
 ---
 
@@ -322,7 +322,7 @@ Middle BGZF blocks are byte-copied at disk bandwidth with no decompression. Only
 
 `-j` controls how many shard pipelines run concurrently and is independent of `-t` (scatter thread count). Set `-j` based on available cores and the concurrency of the tool being run.
 
-For CPU-heavy tools such as VEP, combining paravar's `-j` with the tool's own threading flag (e.g. `--fork`) can reduce wall time further, keeping the total thread count within available cores.
+For CPU-heavy tools such as VEP, combining vcfparty's `-j` with the tool's own threading flag (e.g. `--fork`) can reduce wall time further, keeping the total thread count within available cores.
 
 ---
 
@@ -338,6 +338,6 @@ nimble test
 
 # Performance benchmark (downloads large fixture)
 bash tests/generate_fixtures.sh --perf
-time paravar run --gather -n 8 -j 4 -o out.vcf.gz \
+time vcfparty run --gather -n 8 -j 4 -o out.vcf.gz \
   tests/data/chr22_1kg_full.vcf.gz ::: bcftools view -Oz
 ```

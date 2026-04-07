@@ -4,7 +4,7 @@ author      = "munro.j"
 description = "Parallel processing of VCF files"
 license     = "MIT"
 srcDir      = "src"
-bin         = @["paravar"]
+bin         = @["vcfparty"]
 
 # Dependencies
 requires "nim >= 2.0.0"
@@ -40,7 +40,7 @@ before build:
 
 task release, "Build release binary":
   buildLibdeflate()
-  exec "nim c -d:release src/paravar.nim"
+  exec "nim c -d:release src/vcfparty.nim"
 
 task test, "Run all tests":
   exec "nimble build"   # triggers before build hook → buildLibdeflate + nim compile

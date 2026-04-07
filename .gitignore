@@ -1,13 +1,31 @@
+# Vendored C dependencies (downloaded/built by nimble build)
+vendor/
+xx/
+
 # Build artefacts
 nimcache/
 *.exe
-paravar
+/vcfparty
 
 # Test fixtures (generated, not committed)
-tests/data/*.vcf.gz
-tests/data/*.vcf.gz.tbi
-tests/data/*.vcf.gz.csi
-tests/data/*.vcf
+tests/data
 
 # Nimble package cache
 .nimble/
+tests/test_scatter
+tests/test_run
+tests/test_cli
+tests/test_bgzf_utils
+tests/test_gather
+
+tests/bcf_debug
+src/vcfparty.out
+src/vcfparty/bgzf_utils
+
+# Claude Code local state
+.claude/
+nimble.develop
+nimble.paths
+nimbledeps
+misc/Paravar VCF parallel processing framework.md
+src/vcfparty/bgzf_utils

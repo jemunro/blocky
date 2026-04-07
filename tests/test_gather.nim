@@ -4,8 +4,8 @@
 
 import std/[os, osproc, options, strformat, strutils]
 import std/posix
-import "../src/paravar/gather"
-import "../src/paravar/bgzf_utils"
+import "../src/vcfparty/gather"
+import "../src/vcfparty/bgzf_utils"
 
 const DataDir  = "tests/data"
 const SmallVcf = DataDir / "small.vcf.gz"
@@ -111,7 +111,7 @@ block testValidateConfigOk:
 # ---------------------------------------------------------------------------
 
 const SelfSrc   = "tests/test_gather.nim"
-const HelperBin = "/tmp/paravar_test_gather_helper"
+const HelperBin = "/tmp/vcfparty_test_gather_helper"
 
 block buildHelper:
   let (outp, code) = execCmdEx(
@@ -466,7 +466,7 @@ block testRunInterceptorBcfStrip:
   discard posix.write(fds[1], cast[pointer](unsafeAddr bcfData[0]), bcfData.len)
   discard posix.close(fds[1])
 
-  const TmpBcf = "/tmp/paravar_test_g3_bcf.bin"
+  const TmpBcf = "/tmp/vcfparty_test_g3_bcf.bin"
   discard runInterceptor(GatherConfig(format: gfBcf, compression: gcUncompressed),
                  shardIdx = 1, fds[0], TmpBcf)
 
@@ -504,7 +504,7 @@ block testRunInterceptorVcfStrip:
   discard posix.write(fds[1], cast[pointer](unsafeAddr vcfData[0]), vcfData.len)
   discard posix.close(fds[1])
 
-  const TmpVcf = "/tmp/paravar_test_g3_vcf.txt"
+  const TmpVcf = "/tmp/vcfparty_test_g3_vcf.txt"
   let cfg = GatherConfig(format: gfVcf, compression: gcUncompressed)
   discard runInterceptor(cfg, shardIdx = 1, fds[0], TmpVcf)
 
@@ -538,7 +538,7 @@ block testRunInterceptorHeaderN:
   discard posix.write(fds[1], cast[pointer](unsafeAddr data[0]), data.len)
   discard posix.close(fds[1])
 
-  const TmpN = "/tmp/paravar_test_g3_headern.txt"
+  const TmpN = "/tmp/vcfparty_test_g3_headern.txt"
   let cfg = GatherConfig(format: gfText, compression: gcUncompressed, headerN: some(2))
   discard runInterceptor(cfg, shardIdx = 1, fds[0], TmpN)
 
@@ -573,7 +573,7 @@ block testRunInterceptorNoStrip:
   discard posix.write(fds[1], cast[pointer](unsafeAddr data[0]), data.len)
   discard posix.close(fds[1])
 
-  const TmpPass = "/tmp/paravar_test_g3_nostrip.txt"
+  const TmpPass = "/tmp/vcfparty_test_g3_nostrip.txt"
   let cfg = GatherConfig(format: gfText, compression: gcUncompressed)
   discard runInterceptor(cfg, shardIdx = 1, fds[0], TmpPass)
 
@@ -600,7 +600,7 @@ block testRecompressUncompressedToBgzf:
   discard posix.write(fds[1], cast[pointer](unsafeAddr raw[0]), raw.len)
   discard posix.close(fds[1])
 
-  const TmpRecomp = "/tmp/paravar_test_g4_recomp.bgzf"
+  const TmpRecomp = "/tmp/vcfparty_test_g4_recomp.bgzf"
   discard runInterceptor(GatherConfig(format: gfText, compression: gcBgzf),
                  shardIdx = 0, fds[0], TmpRecomp)
 
@@ -630,7 +630,7 @@ block testDecompressBgzfToUncompressed:
   discard posix.write(fds[1], cast[pointer](unsafeAddr compressed[0]), compressed.len)
   discard posix.close(fds[1])
 
-  const TmpDecomp = "/tmp/paravar_test_g4_decomp.txt"
+  const TmpDecomp = "/tmp/vcfparty_test_g4_decomp.txt"
   discard runInterceptor(GatherConfig(format: gfText, compression: gcUncompressed),
                  shardIdx = 0, fds[0], TmpDecomp)
 
@@ -659,7 +659,7 @@ block testPassThroughBgzfToBgzf:
   discard posix.write(fds[1], cast[pointer](unsafeAddr compressed[0]), compressed.len)
   discard posix.close(fds[1])
 
-  const TmpPassBgzf = "/tmp/paravar_test_g4_passbgzf.bgzf"
+  const TmpPassBgzf = "/tmp/vcfparty_test_g4_passbgzf.bgzf"
   discard runInterceptor(GatherConfig(format: gfText, compression: gcBgzf),
                  shardIdx = 0, fds[0], TmpPassBgzf)
 
@@ -695,7 +695,7 @@ block testShardStripAndRecompress:
   discard posix.write(fds[1], cast[pointer](unsafeAddr vcfData[0]), vcfData.len)
   discard posix.close(fds[1])
 
-  const TmpShard = "/tmp/paravar_test_g4_shard.bgzf"
+  const TmpShard = "/tmp/vcfparty_test_g4_shard.bgzf"
   discard runInterceptor(GatherConfig(format: gfVcf, compression: gcBgzf),
                  shardIdx = 1, fds[0], TmpShard)
 
@@ -735,7 +735,7 @@ block testShardBgzfInputStripAndRecompress:
   discard posix.write(fds[1], cast[pointer](unsafeAddr compressed[0]), compressed.len)
   discard posix.close(fds[1])
 
-  const TmpBgzfShard = "/tmp/paravar_test_g4_bgzf_shard.bgzf"
+  const TmpBgzfShard = "/tmp/vcfparty_test_g4_bgzf_shard.bgzf"
   discard runInterceptor(GatherConfig(format: gfVcf, compression: gcBgzf),
                  shardIdx = 1, fds[0], TmpBgzfShard)
 
@@ -758,7 +758,7 @@ block testShardBgzfInputStripAndRecompress:
 # ---------------------------------------------------------------------------
 
 block testCleanupSuccess:
-  const TmpDir = "/tmp/paravar_test_g5_cleanup_ok"
+  const TmpDir = "/tmp/vcfparty_test_g5_cleanup_ok"
   createDir(TmpDir)
   let f1 = TmpDir / "shard1.tmp"
   let f2 = TmpDir / "shard2.tmp"
@@ -777,7 +777,7 @@ block testCleanupSuccess:
 # ---------------------------------------------------------------------------
 
 block testCleanupFailure:
-  const TmpDir = "/tmp/paravar_test_g5_cleanup_fail"
+  const TmpDir = "/tmp/vcfparty_test_g5_cleanup_fail"
   createDir(TmpDir)
   let f1 = TmpDir / "shard1.tmp"
   writeFile(f1, "content")
@@ -795,8 +795,8 @@ block testCleanupFailure:
 # ---------------------------------------------------------------------------
 
 block testConcatShardsUncompressed:
-  const TmpDir  = "/tmp/paravar_test_g5_concat_unc"
-  const OutPath = "/tmp/paravar_test_g5_out.txt"
+  const TmpDir  = "/tmp/vcfparty_test_g5_concat_unc"
+  const OutPath = "/tmp/vcfparty_test_g5_out.txt"
   createDir(TmpDir)
   let shard1 = TmpDir / "shard1.tmp"
   let shard2 = TmpDir / "shard2.tmp"
@@ -820,8 +820,8 @@ block testConcatShardsUncompressed:
 # ---------------------------------------------------------------------------
 
 block testConcatShardsBgzf:
-  const TmpDir  = "/tmp/paravar_test_g5_concat_bgzf"
-  const OutPath = "/tmp/paravar_test_g5_out.bgzf"
+  const TmpDir  = "/tmp/vcfparty_test_g5_concat_bgzf"
+  const OutPath = "/tmp/vcfparty_test_g5_out.bgzf"
   createDir(TmpDir)
   let shard1 = TmpDir / "shard1.tmp"
   let shard2 = TmpDir / "shard2.tmp"
@@ -879,7 +879,7 @@ echo "All gather G1/G2/G3/G4/G5 unit tests passed."
 # G7 — Integration tests via compiled binary
 # ===========================================================================
 
-const BinPath = "./paravar"
+const BinPath = "./vcfparty"
 
 block buildBinary:
   if not fileExists(BinPath):
@@ -906,7 +906,7 @@ proc runGather(args: string): (string, int) =
 # ---------------------------------------------------------------------------
 
 block testGatherVcfCompressed:
-  let tmpDir = getTempDir() / "paravar_g7_vcf_oz"
+  let tmpDir = getTempDir() / "vcfparty_g7_vcf_oz"
   createDir(tmpDir)
   let outPath = tmpDir / "out.vcf.gz"
   let (outp, code) = runGather(
@@ -926,7 +926,7 @@ block testGatherVcfCompressed:
 # ---------------------------------------------------------------------------
 
 block testGatherVcfRecompress:
-  let tmpDir = getTempDir() / "paravar_g7_vcf_ov"
+  let tmpDir = getTempDir() / "vcfparty_g7_vcf_ov"
   createDir(tmpDir)
   let outPath = tmpDir / "out.vcf.gz"
   let (outp, code) = runGather(
@@ -946,7 +946,7 @@ block testGatherVcfRecompress:
 # ---------------------------------------------------------------------------
 
 block testGatherBcfCompressed:
-  let tmpDir = getTempDir() / "paravar_g7_bcf_ob"
+  let tmpDir = getTempDir() / "vcfparty_g7_bcf_ob"
   createDir(tmpDir)
   let outPath = tmpDir / "out.bcf"
   let (outp, code) = runGather(
@@ -966,7 +966,7 @@ block testGatherBcfCompressed:
 # ---------------------------------------------------------------------------
 
 block testGatherBcfRecompress:
-  let tmpDir = getTempDir() / "paravar_g7_bcf_ou"
+  let tmpDir = getTempDir() / "vcfparty_g7_bcf_ou"
   createDir(tmpDir)
   let outPath = tmpDir / "out.bcf"
   let (outp, code) = runGather(
@@ -986,7 +986,7 @@ block testGatherBcfRecompress:
 # ---------------------------------------------------------------------------
 
 block testGatherText:
-  let tmpDir = getTempDir() / "paravar_g7_text"
+  let tmpDir = getTempDir() / "vcfparty_g7_text"
   createDir(tmpDir)
   let outPath = tmpDir / "out.txt"
   let (outp, code) = runGather(
@@ -1009,7 +1009,7 @@ block testGatherTextHeaderN:
   # Pipeline prepends a fixed header line to each shard's output.
   # With --header-n 1, shards 2..4 should have their header line stripped.
   # Result: 1 header line + 5000 data lines = 5001 lines total.
-  let tmpDir = getTempDir() / "paravar_g7_text_headern"
+  let tmpDir = getTempDir() / "vcfparty_g7_text_headern"
   createDir(tmpDir)
   let outPath = tmpDir / "out.txt"
   let pipeline = "{ echo 'CHROM\tPOS'; bcftools query -f '%CHROM\\t%POS\\n'; }"
@@ -1036,7 +1036,7 @@ block testGatherTextHeaderN:
 block testGatherUnknownExt:
   # .out.gz is not a recognised VCF/BCF prefix → inferred as text, BGZF (from .gz).
   # No --gather-fmt needed under the new lenient inference rules.
-  let tmpDir = getTempDir() / "paravar_g7_unknown_ext"
+  let tmpDir = getTempDir() / "vcfparty_g7_unknown_ext"
   createDir(tmpDir)
   let outPath = tmpDir / "out.out.gz"
   let (outp, code) = runGather(
@@ -1065,13 +1065,13 @@ block testGatherUnknownExt:
 # ---------------------------------------------------------------------------
 
 block testGatherShardFailure:
-  let tmpDir  = getTempDir() / "paravar_g7_fail"
-  let tDir    = getTempDir() / "paravar_g7_fail_tmp"
+  let tmpDir  = getTempDir() / "vcfparty_g7_fail"
+  let tDir    = getTempDir() / "vcfparty_g7_fail_tmp"
   createDir(tmpDir)
   let outPath = tmpDir / "out.vcf.gz"
   let (outp, code) = runGather(
     &"-n 2 --gather -o {outPath} --tmp-dir {tDir} {SmallVcf} --- false")
-  doAssert code != 0, "shard failure: paravar should exit non-zero"
+  doAssert code != 0, "shard failure: vcfparty should exit non-zero"
   # At least one temp path should be printed to stderr.
   doAssert tDir in outp,
     &"shard failure: expected tmp dir path in stderr, got:\n{outp}"
@@ -1087,8 +1087,8 @@ block testGatherShardFailure:
 # ---------------------------------------------------------------------------
 
 block testGatherCustomTmpDir:
-  let tmpDir    = getTempDir() / "paravar_g7_custom_tmp"
-  let customTmp = getTempDir() / "paravar_g7_my_tmp_dir"
+  let tmpDir    = getTempDir() / "vcfparty_g7_custom_tmp"
+  let customTmp = getTempDir() / "vcfparty_g7_my_tmp_dir"
   createDir(tmpDir)
   let outPath = tmpDir / "out.vcf.gz"
   let (outp, code) = runGather(
@@ -1112,7 +1112,7 @@ block testGatherTextHeaderPattern:
   # Pipeline prepends a "##"-prefixed header line to each shard's output.
   # With --header-pattern "##", shards 2..4 should have that line stripped.
   # Result: 1 header line + 5000 data lines = 5001 lines total.
-  let tmpDir = getTempDir() / "paravar_g7_text_headerpattern"
+  let tmpDir = getTempDir() / "vcfparty_g7_text_headerpattern"
   createDir(tmpDir)
   let outPath = tmpDir / "out.txt"
   let pipeline = "{ echo '##CHROM\tPOS'; bcftools query -f '%CHROM\\t%POS\\n'; }"
@@ -1147,7 +1147,7 @@ proc runGatherSubcmd(args: string): (string, int) =
 # ---------------------------------------------------------------------------
 
 block testGatherSubcmdVcf:
-  let tmpDir = getTempDir() / "paravar_g8_vcf"
+  let tmpDir = getTempDir() / "vcfparty_g8_vcf"
   createDir(tmpDir)
   let shardTemplate = tmpDir / "shard.{}.vcf.gz"
   # Scatter into 4 shards via CLI.
@@ -1176,7 +1176,7 @@ block testGatherSubcmdVcf:
 # ---------------------------------------------------------------------------
 
 block testGatherSubcmdBcf:
-  let tmpDir = getTempDir() / "paravar_g8_bcf"
+  let tmpDir = getTempDir() / "vcfparty_g8_bcf"
   createDir(tmpDir)
   let (sOutp, sCode) = execCmdEx(
     BinPath & &" scatter -n 4 -o {tmpDir}/shard.bcf {SmallBcf} 2>&1")
@@ -1202,7 +1202,7 @@ block testGatherSubcmdBcf:
 # ---------------------------------------------------------------------------
 
 block testGatherSubcmdStdout:
-  let tmpDir = getTempDir() / "paravar_g8_stdout"
+  let tmpDir = getTempDir() / "vcfparty_g8_stdout"
   createDir(tmpDir)
   let (sOutp, sCode) = execCmdEx(
     BinPath & &" scatter -n 4 -o {tmpDir}/shard.vcf.gz {SmallVcf} 2>&1")
@@ -1228,7 +1228,7 @@ block testGatherSubcmdStdout:
 # ---------------------------------------------------------------------------
 
 block testGatherSubcmdDevStdout:
-  let tmpDir = getTempDir() / "paravar_g8_devstdout"
+  let tmpDir = getTempDir() / "vcfparty_g8_devstdout"
   createDir(tmpDir)
   let (sOutp, sCode) = execCmdEx(
     BinPath & &" scatter -n 4 -o {tmpDir}/shard.vcf.gz {SmallVcf} 2>&1")
@@ -1252,7 +1252,7 @@ block testGatherSubcmdDevStdout:
 # ---------------------------------------------------------------------------
 
 block testGatherSubcmdNoInputs:
-  let tmpDir = getTempDir() / "paravar_g8_noinput"
+  let tmpDir = getTempDir() / "vcfparty_g8_noinput"
   createDir(tmpDir)
   let outPath = tmpDir / "out.vcf.gz"
   let (outp, code) = runGatherSubcmd(&"-o {outPath}")
@@ -1265,7 +1265,7 @@ block testGatherSubcmdNoInputs:
 # ---------------------------------------------------------------------------
 
 block testGatherSubcmdMissingFile:
-  let tmpDir = getTempDir() / "paravar_g8_missing"
+  let tmpDir = getTempDir() / "vcfparty_g8_missing"
   createDir(tmpDir)
   let outPath = tmpDir / "out.vcf.gz"
   let (outp, code) = runGatherSubcmd(&"-o {outPath} /nonexistent/shard.vcf.gz")
@@ -1280,7 +1280,7 @@ block testGatherSubcmdMissingFile:
 # ---------------------------------------------------------------------------
 
 block testRunGatherStdout:
-  let tmpDir = getTempDir() / "paravar_g8_rungather_stdout"
+  let tmpDir = getTempDir() / "vcfparty_g8_rungather_stdout"
   createDir(tmpDir)
   let stdoutFile = tmpDir / "stdout.vcf"
   # No -o; stdout is captured via shell redirection.
@@ -1382,7 +1382,7 @@ block testChromLineFromFile:
 # ---------------------------------------------------------------------------
 
 block testGatherChromMatch:
-  let tmpDir = getTempDir() / "paravar_s2_match"
+  let tmpDir = getTempDir() / "vcfparty_s2_match"
   createDir(tmpDir)
   let (sOutp, sCode) = execCmdEx(
     BinPath & &" scatter -n 4 -o {tmpDir}/shard.vcf.gz {SmallVcf} 2>&1")
@@ -1405,7 +1405,7 @@ block testGatherChromMatch:
 
 block testGatherChromMismatch:
   # Build two synthetic BGZF-VCF files with different sample columns.
-  let tmpDir = getTempDir() / "paravar_s2_mismatch"
+  let tmpDir = getTempDir() / "vcfparty_s2_mismatch"
   removeDir(tmpDir)
   createDir(tmpDir)
   let vcfA =

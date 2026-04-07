@@ -4,8 +4,8 @@
 ## Requires: tests/data/small.vcf.gz, tests/data/small.bcf (run generate_fixtures.sh once)
 
 import std/[os, osproc, strformat, strutils]
-import "../src/paravar/scatter"
-import "../src/paravar/run"
+import "../src/vcfparty/scatter"
+import "../src/vcfparty/run"
 
 const DataDir  = "tests/data"
 const SmallVcf = DataDir / "small.vcf.gz"
@@ -16,14 +16,14 @@ const SmallBcf = DataDir / "small.bcf"
 # ===========================================================================
 
 # ---------------------------------------------------------------------------
-# R1 — testSingleStage: single --- stage; paravar args and stage tokens correct
+# R1 — testSingleStage: single --- stage; vcfparty args and stage tokens correct
 # ---------------------------------------------------------------------------
 block testSingleStage:
   let argv = @["--shards", "4", "-o", "out", "input.vcf.gz",
                "---", "bcftools", "view", "-Oz"]
   let (pArgs, stages) = parseRunArgv(argv)
   doAssert pArgs == @["--shards", "4", "-o", "out", "input.vcf.gz"],
-    "single stage: wrong paravar args"
+    "single stage: wrong vcfparty args"
   doAssert stages.len == 1, "single stage: expected 1 stage, got " & $stages.len
   doAssert stages[0] == @["bcftools", "view", "-Oz"],
     "single stage: wrong stage tokens"
@@ -38,7 +38,7 @@ block testMultiStage:
                "---",
                "bcftools", "view", "-s", "Sample", "-Oz"]
   let (pArgs, stages) = parseRunArgv(argv)
-  doAssert pArgs == @["-n", "10"], "multi-stage: wrong paravar args"
+  doAssert pArgs == @["-n", "10"], "multi-stage: wrong vcfparty args"
   doAssert stages.len == 2, "multi-stage: expected 2 stages, got " & $stages.len
   doAssert stages[0] == @["bcftools", "+split-vep", "-Ou", "--", "-f", "%SYMBOL"],
     "multi-stage: wrong stage 0 tokens"
@@ -52,7 +52,7 @@ block testMultiStage:
 block testSepFirst:
   let argv = @["---", "cat"]
   let (pArgs, stages) = parseRunArgv(argv)
-  doAssert pArgs.len == 0, "sep-first: paravar args should be empty"
+  doAssert pArgs.len == 0, "sep-first: vcfparty args should be empty"
   doAssert stages.len == 1, "sep-first: expected 1 stage"
   doAssert stages[0] == @["cat"], "sep-first: wrong stage tokens"
   echo "PASS parseRunArgv: --- first, no paravar args"
@@ -74,7 +74,7 @@ block testDashDashPassthrough:
 block testColonColonSep:
   let argv = @["-n", "4", ":::", "bcftools", "view", "-Oz"]
   let (pArgs, stages) = parseRunArgv(argv)
-  doAssert pArgs == @["-n", "4"], "::: sep: wrong paravar args"
+  doAssert pArgs == @["-n", "4"], "::: sep: wrong vcfparty args"
   doAssert stages.len == 1, "::: sep: expected 1 stage"
   doAssert stages[0] == @["bcftools", "view", "-Oz"], "::: sep: wrong stage tokens"
   echo "PASS parseRunArgv: ::: is alias for ---"
@@ -134,7 +134,7 @@ proc countRecords(path: string): int =
 proc recordsHash(paths: seq[string]): string =
   ## Concatenate records from paths in order (bcftools view -H, full genotypes),
   ## write to temp file, return sha256sum hex digest.
-  let tmp = getTempDir() / "paravar_hash_" & $getCurrentProcessId() & ".txt"
+  let tmp = getTempDir() / "vcfparty_hash_" & $getCurrentProcessId() & ".txt"
   var f = open(tmp, fmWrite)
   for p in paths:
     let (o, _) = execCmdEx("bcftools view -H " & p & " 2>/dev/null")
@@ -149,7 +149,7 @@ proc recordsHash(paths: seq[string]): string =
 # ---------------------------------------------------------------------------
 block testRunSingle1Shard:
   doAssert fileExists(SmallVcf), "fixture missing — run generate_fixtures.sh"
-  let tmpDir = getTempDir() / "paravar_run_r10_1shard"
+  let tmpDir = getTempDir() / "vcfparty_run_r10_1shard"
   createDir(tmpDir)
   let tmpl = tmpDir / "out.{}.vcf.gz"
   runShards(SmallVcf, 1, tmpl, 1, false, 1, @[@["cat"]])
@@ -168,7 +168,7 @@ block testRunSingle1Shard:
 # ---------------------------------------------------------------------------
 block testRun4Shards:
   doAssert fileExists(SmallVcf), "fixture missing"
-  let tmpDir = getTempDir() / "paravar_run_r11_4shards"
+  let tmpDir = getTempDir() / "vcfparty_run_r11_4shards"
   createDir(tmpDir)
   let tmpl = tmpDir / "out.{}.vcf.gz"
   runShards(SmallVcf, 4, tmpl, 1, false, 4, @[@["cat"]])
@@ -193,7 +193,7 @@ block testRun4Shards:
 # ---------------------------------------------------------------------------
 block testRunJobs1Serial:
   doAssert fileExists(SmallVcf), "fixture missing"
-  let tmpDir = getTempDir() / "paravar_run_r12_jobs1"
+  let tmpDir = getTempDir() / "vcfparty_run_r12_jobs1"
   createDir(tmpDir)
   let tmpl = tmpDir / "out.{}.vcf.gz"
   runShards(SmallVcf, 4, tmpl, 1, false, 1, @[@["cat"]])  # maxJobs = 1
@@ -214,7 +214,7 @@ block testRunJobs1Serial:
 # ---------------------------------------------------------------------------
 block testRunJobsMoreThanShards:
   doAssert fileExists(SmallVcf), "fixture missing"
-  let tmpDir = getTempDir() / "paravar_run_r13_jobsover"
+  let tmpDir = getTempDir() / "vcfparty_run_r13_jobsover"
   createDir(tmpDir)
   let tmpl = tmpDir / "out.{}.vcf.gz"
   runShards(SmallVcf, 2, tmpl, 1, false, 10, @[@["cat"]])  # 10 jobs for 2 shards
@@ -228,7 +228,7 @@ block testRunJobsMoreThanShards:
 # ---------------------------------------------------------------------------
 block testBcfRun4Shards:
   doAssert fileExists(SmallBcf), "BCF fixture missing — run generate_fixtures.sh"
-  let tmpDir = getTempDir() / "paravar_run_r14_bcf4"
+  let tmpDir = getTempDir() / "vcfparty_run_r14_bcf4"
   createDir(tmpDir)
   let tmpl = tmpDir / "out.{}.bcf"
   runShards(SmallBcf, 4, tmpl, 1, false, 4, @[@["bcftools", "view", "-Ob"]])
@@ -252,7 +252,7 @@ block testBcfRun4Shards:
 # R15–R25 — CLI integration tests via the compiled binary
 # ===========================================================================
 
-const BinPath = "./paravar"
+const BinPath = "./vcfparty"
 
 block buildBinary:
   if not fileExists(BinPath):
@@ -279,7 +279,7 @@ block testCliRunMissingSep:
 # R16 — testCliRun1Shard: run -n 1 --- cat; output valid, record count matches
 # ---------------------------------------------------------------------------
 block testCliRun1Shard:
-  let tmpDir = getTempDir() / "paravar_r16_1shard"
+  let tmpDir = getTempDir() / "vcfparty_r6_1shard"
   createDir(tmpDir)
   let outp_template = tmpDir / "out.vcf.gz"
   let (outp, code) = runBin(&"-n 1 -o {outp_template} {SmallVcf} --- cat")
@@ -297,7 +297,7 @@ block testCliRun1Shard:
 # R17 — testCliRun4Shards: run -n 4 --- cat; 4 shards valid, record count matches
 # ---------------------------------------------------------------------------
 block testCliRun4Shards:
-  let tmpDir = getTempDir() / "paravar_r17_4shards"
+  let tmpDir = getTempDir() / "vcfparty_r7_4shards"
   createDir(tmpDir)
   let outp_template = tmpDir / "out.vcf.gz"
   let (outp, code) = runBin(&"-n 4 -o {outp_template} {SmallVcf} --- cat")
@@ -317,7 +317,7 @@ block testCliRun4Shards:
 # R18 — testCliRunMultiStage: run -n 2 --- cat --- cat; record count matches
 # ---------------------------------------------------------------------------
 block testCliRunMultiStage:
-  let tmpDir = getTempDir() / "paravar_r18_multistage"
+  let tmpDir = getTempDir() / "vcfparty_r8_multistage"
   createDir(tmpDir)
   let outp_template = tmpDir / "out.vcf.gz"
   let (outp, code) = runBin(&"-n 2 -o {outp_template} {SmallVcf} --- cat --- cat")
@@ -335,7 +335,7 @@ block testCliRunMultiStage:
 # R19 — testCliRunJobs1: run -j 1 (serial); 4 shards, record count matches
 # ---------------------------------------------------------------------------
 block testCliRunJobs1:
-  let tmpDir = getTempDir() / "paravar_r19_jobs1"
+  let tmpDir = getTempDir() / "vcfparty_r9_jobs1"
   createDir(tmpDir)
   let outp_template = tmpDir / "out.vcf.gz"
   let (outp, code) = runBin(&"-n 4 -j 1 -o {outp_template} {SmallVcf} --- cat")
@@ -355,7 +355,7 @@ block testCliRunJobs1:
 block testCliRunAttachedFlags:
   # Nim's parseopt splits -j2 into two short options; nextVal must recover the
   # digit value when the next token is all-digit.
-  let tmpDir = getTempDir() / "paravar_r20_attached"
+  let tmpDir = getTempDir() / "vcfparty_r0_attached"
   createDir(tmpDir)
   let outp_template = tmpDir / "out.vcf.gz"
   let (outp, code) = runBin(&"-n4 -j2 -o {outp_template} {SmallVcf} --- cat")
@@ -373,7 +373,7 @@ block testCliRunAttachedFlags:
 # R21 — testCliRunJobsOver: -j > nShards; completes without hang
 # ---------------------------------------------------------------------------
 block testCliRunJobsOver:
-  let tmpDir = getTempDir() / "paravar_r21_jobsover"
+  let tmpDir = getTempDir() / "vcfparty_r1_jobsover"
   createDir(tmpDir)
   let outp_template = tmpDir / "out.vcf.gz"
   let (outp, code) = runBin(&"-n 2 -j 10 -o {outp_template} {SmallVcf} --- cat")
@@ -384,23 +384,23 @@ block testCliRunJobsOver:
   echo "PASS CLI run: -j > nShards, no hang"
 
 # ---------------------------------------------------------------------------
-# R22 — testCliRunNonZeroExit: non-zero stage exit → paravar exits 1, shard mentioned
+# R22 — testCliRunNonZeroExit: non-zero stage exit → vcfparty exits 1, shard mentioned
 # ---------------------------------------------------------------------------
 block testCliRunNonZeroExit:
-  let tmpDir = getTempDir() / "paravar_r22_fail"
+  let tmpDir = getTempDir() / "vcfparty_r2_fail"
   createDir(tmpDir)
   let outp_template = tmpDir / "out.vcf.gz"
   let (outp, code) = runBin(&"-n 1 -o {outp_template} {SmallVcf} --- false")
-  doAssert code != 0, "non-zero stage should make paravar exit non-zero"
+  doAssert code != 0, "non-zero stage should make vcfparty exit non-zero"
   doAssert "shard 1" in outp, &"stderr should mention 'shard 1', got:\n{outp}"
   removeDir(tmpDir)
-  echo "PASS CLI run: non-zero stage exit → paravar exits 1, shard mentioned"
+  echo "PASS CLI run: non-zero stage exit → vcfparty exits 1, shard mentioned"
 
 # ---------------------------------------------------------------------------
 # R23 — testCliRunColonColon: ::: separator works at CLI level
 # ---------------------------------------------------------------------------
 block testCliRunColonColon:
-  let tmpDir = getTempDir() / "paravar_r23_coloncolon"
+  let tmpDir = getTempDir() / "vcfparty_r3_coloncolon"
   createDir(tmpDir)
   let outp_template = tmpDir / "out.vcf.gz"
   let (outp, code) = runBin(&"-n 2 -o {outp_template} {SmallVcf} ::: cat")
@@ -416,7 +416,7 @@ block testCliRunColonColon:
 # ---------------------------------------------------------------------------
 block testCliRunDashDashPassthrough:
   # bcftools view -Oz -- - reads stdin, writes bgzipped VCF to stdout.
-  let tmpDir = getTempDir() / "paravar_r24_dashdash"
+  let tmpDir = getTempDir() / "vcfparty_r4_dashdash"
   createDir(tmpDir)
   let outp_template = tmpDir / "out.vcf.gz"
   let (outp, code) = runBin(&"-n 1 -o {outp_template} {SmallVcf} --- bcftools view -Oz -- -")
@@ -434,7 +434,7 @@ block testCliRunNoKill:
   # Smoke test: verify --no-kill parses and the run succeeds when all shards
   # succeed.  Behavioural difference (siblings not killed on failure) is hard to
   # assert deterministically in a unit test.
-  let tmpDir = getTempDir() / "paravar_r25_nokill"
+  let tmpDir = getTempDir() / "vcfparty_r5_nokill"
   createDir(tmpDir)
   let outp_template = tmpDir / "out.vcf.gz"
   let (outp, code) = runBin(&"-n 2 --no-kill -o {outp_template} {SmallVcf} --- cat")
@@ -561,7 +561,7 @@ block testBuildShellCmdForShardWidthOne:
 # ---------------------------------------------------------------------------
 block testToolManagedApiDirect:
   doAssert fileExists(SmallVcf), "fixture missing"
-  let tmpDir = getTempDir() / "paravar_t3_1_tool_api"
+  let tmpDir = getTempDir() / "vcfparty_t3_1_tool_api"
   createDir(tmpDir)
   let outTemplate = tmpDir / "out.{}.vcf.gz"
   # Tool writes its own output using {} substitution.
@@ -585,7 +585,7 @@ block testToolManagedApiDirect:
 # ---------------------------------------------------------------------------
 block testToolManagedCli:
   doAssert fileExists(SmallVcf), "fixture missing"
-  let tmpDir = getTempDir() / "paravar_t3_2_tool_cli"
+  let tmpDir = getTempDir() / "vcfparty_t3_2_tool_cli"
   createDir(tmpDir)
   let outTemplate = tmpDir / "out.{}.vcf.gz"
   let (outp, code) = execCmdEx(
@@ -607,7 +607,7 @@ block testToolManagedCli:
 # ---------------------------------------------------------------------------
 block testToolManagedCliWithO:
   doAssert fileExists(SmallVcf), "fixture missing"
-  let tmpDir = getTempDir() / "paravar_t3_3_tool_cli_o"
+  let tmpDir = getTempDir() / "vcfparty_t3_3_tool_cli_o"
   createDir(tmpDir)
   let outTemplate = tmpDir / "out.{}.vcf.gz"
   let (outp, code) = execCmdEx(

@@ -1,8 +1,8 @@
-# paravar — Project Summary
+# vcfparty — Project Summary
 
 ## What it is
 
-**paravar** is a Nim CLI tool for splitting bgzipped VCF and BCF files into N roughly equal shards without decompressing the middle blocks, and optionally piping each shard through a tool pipeline in parallel, with optional output gathering back into a single file.
+**vcfparty** is a Nim CLI tool for splitting bgzipped VCF and BCF files into N roughly equal shards without decompressing the middle blocks, and optionally piping each shard through a tool pipeline in parallel, with optional output gathering back into a single file.
 
 The key design goal is speed — middle BGZF blocks are byte-copied from disk without decompression or recompression. Only the boundary blocks (one per shard split) are decompressed and recompressed.
 
@@ -15,7 +15,7 @@ All four subcommand modes are implemented for VCF (`*.vcf.gz`) and BCF (`*.bcf`)
 ### `scatter`
 
 ```
-paravar scatter -n <n> -o <o> [options] <input.vcf.gz|input.bcf>
+vcfparty scatter -n <n> -o <o> [options] <input.vcf.gz|input.bcf>
 ```
 
 | Flag | Long form | Description |
@@ -50,7 +50,7 @@ Parent directories are created automatically (`mkdir -p`).
 Scatter → parallel per-shard tool pipelines → per-shard output files. No temporary files; shard bytes flow directly from the scatter writer into the stdin pipe of the shell pipeline.
 
 ```
-paravar run -n <n> -o <o> [options] <input.vcf.gz|input.bcf> \
+vcfparty run -n <n> -o <o> [options] <input.vcf.gz|input.bcf> \
   (--- | :::) <cmd1> [args...] \
   [(--- | :::) <cmd2> [args...] ...]
 ```
@@ -75,7 +75,7 @@ paravar run -n <n> -o <o> [options] <input.vcf.gz|input.bcf> \
 As `run`, but intercept each shard's stdout, strip duplicate headers from shards 2..N, and concatenate all shard outputs into a single output file. No external tools (bcftools etc.) used — all concatenation is native Nim.
 
 ```
-paravar run --gather [-o <output.vcf.gz>] [options] <input.vcf.gz|input.bcf> \
+vcfparty run --gather [-o <output.vcf.gz>] [options] <input.vcf.gz|input.bcf> \
   (--- | :::) <cmd> [args...]
 ```
 
@@ -86,14 +86,14 @@ paravar run --gather [-o <output.vcf.gz>] [options] <input.vcf.gz|input.bcf> \
 | | `--gather` | Bare flag — gather shard outputs into a single `-o` file |
 | | `--header-pattern <pat>` | Strip lines with this prefix from shards 2..N (**text format only**) |
 | | `--header-n <n>` | Strip first N lines from shards 2..N (**text format only**) |
-| | `--tmp-dir <dir>` | Temp dir for shard files (default: `$TMPDIR/paravar`) |
+| | `--tmp-dir <dir>` | Temp dir for shard files (default: `$TMPDIR/vcfparty`) |
 
 ### `gather`
 
 Concatenate pre-existing shard files (output of `scatter` or `run`) into a single output file. Same header-stripping and recompression logic as `run --gather`. No temp files needed — reads directly from input files.
 
 ```
-paravar gather [-o <output.vcf.gz>] [options] <shard1> [<shard2> ...]
+vcfparty gather [-o <output.vcf.gz>] [options] <shard1> [<shard2> ...]
 ```
 
 If `-o` is omitted or set to `/dev/stdout`, output is written to stdout uncompressed.
@@ -135,12 +135,12 @@ If `-o` is omitted or set to `/dev/stdout`, output is written to stdout uncompre
 
 | File | Responsibility |
 |------|----------------|
-| `src/paravar.nim` | Entry point (`include paravar/main`) |
-| `src/paravar/main.nim` | CLI arg parsing (`parseopt`), subcommand dispatch (`scatter`/`run`/`gather`). `nextVal` supports attached short-flag values (e.g. `-j2`, `-n4`). |
-| `src/paravar/scatter.nim` | Scatter algorithm: index parsing, boundary optimisation, shard writing. Exports `computeShards`, `doWriteShard`, `shardOutputPath`. |
-| `src/paravar/bgzf_utils.nim` | Low-level BGZF I/O: scan blocks, decompress, compress, raw copy, boundary split, BCF record boundary split, virtual offset helpers. Vendored libdeflate (`vendor/libdeflate-1.25/`) statically linked. |
-| `src/paravar/run.nim` | `run` subcommand: `---`/`:::` argv parsing, shell command construction, `fork`/`exec` per shard, worker pool. Gather mode: spawns per-shard interceptor threads, calls `concatenateShards`. |
-| `src/paravar/gather.nim` | Gather module: types, format inference, sniffing, header stripping; shared shard-writing helpers (`stripTrailingEof`, `writeShardZero`, `writeShardData`); `runInterceptor`, `concatenateShards`, `cleanupTempDir`, `gatherFiles` (direct-file gather for `gather` subcommand). |
+| `src/vcfparty.nim` | Entry point (`include vcfparty/main`) |
+| `src/vcfparty/main.nim` | CLI arg parsing (`parseopt`), subcommand dispatch (`scatter`/`run`/`gather`). `nextVal` supports attached short-flag values (e.g. `-j2`, `-n4`). |
+| `src/vcfparty/scatter.nim` | Scatter algorithm: index parsing, boundary optimisation, shard writing. Exports `computeShards`, `doWriteShard`, `shardOutputPath`. |
+| `src/vcfparty/bgzf_utils.nim` | Low-level BGZF I/O: scan blocks, decompress, compress, raw copy, boundary split, BCF record boundary split, virtual offset helpers. Vendored libdeflate (`vendor/libdeflate-1.25/`) statically linked. |
+| `src/vcfparty/run.nim` | `run` subcommand: `---`/`:::` argv parsing, shell command construction, `fork`/`exec` per shard, worker pool. Gather mode: spawns per-shard interceptor threads, calls `concatenateShards`. |
+| `src/vcfparty/gather.nim` | Gather module: types, format inference, sniffing, header stripping; shared shard-writing helpers (`stripTrailingEof`, `writeShardZero`, `writeShardData`); `runInterceptor`, `concatenateShards`, `cleanupTempDir`, `gatherFiles` (direct-file gather for `gather` subcommand). |
 
 ### Scatter algorithm — VCF path (4 phases)
 

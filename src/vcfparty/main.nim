@@ -1,5 +1,5 @@
-## paravar CLI — argument parsing and subcommand dispatch.
-## Entry point is src/paravar.nim which includes this file.
+## vcfparty CLI — argument parsing and subcommand dispatch.
+## Entry point is src/vcfparty.nim which includes this file.
 
 import std/[options, os, parseopt, strutils]
 import scatter
@@ -33,21 +33,21 @@ const VERSION = "0.1.0"
 
 proc usage() =
   ## Print top-level usage to stderr and exit 1.
-  stderr.writeLine "paravar v" & VERSION
+  stderr.writeLine "vcfparty v" & VERSION
   stderr.writeLine ""
-  stderr.writeLine "Usage: paravar <subcommand> [options]"
+  stderr.writeLine "Usage: vcfparty <subcommand> [options]"
   stderr.writeLine ""
   stderr.writeLine "Subcommands:"
   stderr.writeLine "  scatter   Split a bgzipped VCF/BCF into N shards"
   stderr.writeLine "  run       Scatter, pipe each shard through a tool pipeline"
   stderr.writeLine "  gather    Concatenate pre-existing shard files into a single output"
   stderr.writeLine ""
-  stderr.writeLine "Run 'paravar <subcommand> --help' for subcommand options."
+  stderr.writeLine "Run 'vcfparty <subcommand> --help' for subcommand options."
   quit(1)
 
 proc scatterUsage() =
   ## Print scatter subcommand usage to stderr and exit 1.
-  stderr.writeLine "Usage: paravar scatter -n <n_shards> -o <prefix> [options] <input.vcf.gz>"
+  stderr.writeLine "Usage: vcfparty scatter -n <n_shards> -o <prefix> [options] <input.vcf.gz>"
   stderr.writeLine ""
   stderr.writeLine "Options:"
   stderr.writeLine "  -n, --n-shards <int>      number of output shards (required, >= 1)"
@@ -142,7 +142,7 @@ proc runScatter(rawArgs: seq[string]) =
     quit(1)
   let fmt = detectFormat(inputFile)
   if fmt == FileFormat.Bcf and forceScan:
-    stderr.writeLine "error: paravar: --force-scan is not supported for BCF input"
+    stderr.writeLine "error: vcfparty: --force-scan is not supported for BCF input"
     quit(1)
   if not nThreadsSet:
     nThreads = min(nShards, 8)
@@ -151,7 +151,7 @@ proc runScatter(rawArgs: seq[string]) =
 
 proc runUsage() =
   ## Print run subcommand usage to stderr and exit 1.
-  stderr.writeLine "Usage: paravar run -n <n_shards> -o <output> [options] <input.vcf.gz> (--- | :::) <cmd> [args...] [(--- | :::) <cmd2> ...]"
+  stderr.writeLine "Usage: vcfparty run -n <n_shards> -o <output> [options] <input.vcf.gz> (--- | :::) <cmd> [args...] [(--- | :::) <cmd2> ...]"
   stderr.writeLine ""
   stderr.writeLine "Options:"
   stderr.writeLine "  -n, --n-shards <int>         number of shards (required, >= 1)"
@@ -163,13 +163,13 @@ proc runUsage() =
   stderr.writeLine "      --gather                 gather shard outputs into single -o file"
   stderr.writeLine "      --header-pattern <pat>   strip lines starting with pat from shards 2..N (text format only)"
   stderr.writeLine "      --header-n <n>           strip the first n lines from shards 2..N (text format only)"
-  stderr.writeLine "      --tmp-dir <dir>          temp dir for gather shard files (default: $TMPDIR/paravar)"
+  stderr.writeLine "      --tmp-dir <dir>          temp dir for gather shard files (default: $TMPDIR/vcfparty)"
   stderr.writeLine "  -v, --verbose                print per-shard progress to stderr"
   stderr.writeLine "  -h, --help                   show this help"
   stderr.writeLine ""
   stderr.writeLine "Separate pipeline stages with --- or ::::"
-  stderr.writeLine "  paravar run -n 8 -o out.vcf.gz input.vcf.gz --- bcftools view -i \"GT='alt'\" -Oz"
-  stderr.writeLine "  paravar run -n 8 --gather -o out.vcf.gz input.vcf.gz --- bcftools view -Oz"
+  stderr.writeLine "  vcfparty run -n 8 -o out.vcf.gz input.vcf.gz --- bcftools view -i \"GT='alt'\" -Oz"
+  stderr.writeLine "  vcfparty run -n 8 --gather -o out.vcf.gz input.vcf.gz --- bcftools view -Oz"
   quit(1)
 
 proc runRun(rawArgs: seq[string]) =
@@ -287,7 +287,7 @@ proc runRun(rawArgs: seq[string]) =
     quit(1)
   let fmt = detectFormat(inputFile)
   if fmt == FileFormat.Bcf and forceScan:
-    stderr.writeLine "error: paravar: --force-scan is not supported for BCF input"
+    stderr.writeLine "error: vcfparty: --force-scan is not supported for BCF input"
     quit(1)
   if not nJobsSet:
     nJobs = nShards
@@ -302,7 +302,7 @@ proc runRun(rawArgs: seq[string]) =
     let (gFmt, gComp) = inferGatherFormat(outPrefix, "")
     let resolvedTmpDir =
       if tmpDir != "": tmpDir
-      else: getEnv("TMPDIR", "/tmp") / "paravar"
+      else: getEnv("TMPDIR", "/tmp") / "vcfparty"
     var cfg = GatherConfig(
       format:      gFmt,
       compression: if isStdout: gcUncompressed else: gComp,
@@ -329,7 +329,7 @@ proc runRun(rawArgs: seq[string]) =
 
 proc gatherUsage() =
   ## Print gather subcommand usage to stderr and exit 1.
-  stderr.writeLine "Usage: paravar gather [-o <output>] [options] <shard1> [<shard2> ...]"
+  stderr.writeLine "Usage: vcfparty gather [-o <output>] [options] <shard1> [<shard2> ...]"
   stderr.writeLine ""
   stderr.writeLine "Options:"
   stderr.writeLine "  -o, --output <str>           gather output path (default: stdout)"
@@ -418,7 +418,7 @@ proc mainEntry*() =
   of "gather":
     runGather(args[1 .. ^1])
   of "--version":
-    echo "paravar v" & VERSION
+    echo "vcfparty v" & VERSION
   of "--help", "-h":
     usage()
   else:

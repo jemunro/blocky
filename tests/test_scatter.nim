@@ -3,8 +3,8 @@
 ## Run from project root: nim c -r tests/test_scatter.nim
 
 import std/[algorithm, os, strformat, strutils]
-import "../src/paravar/bgzf_utils"
-import "../src/paravar/scatter"
+import "../src/vcfparty/bgzf_utils"
+import "../src/vcfparty/scatter"
 
 const DataDir  = "tests/data"
 const SmallVcf = DataDir / "small.vcf.gz"     # TBI indexed
@@ -256,7 +256,7 @@ block testScanAllBlockStarts:
 # SC12 — testScatter4ShardsTbi: 4 shards (TBI); BGZF structure, completeness, order, size balance
 # ---------------------------------------------------------------------------
 block testScatter4ShardsTbi:
-  let tmpDir = getTempDir() / "paravar_scatter_tbi_test"
+  let tmpDir = getTempDir() / "vcfparty_scatter_tbi_test"
   createDir(tmpDir)
   let tmpl = tmpDir / "shard.{}.vcf.gz"
   scatter(SmallVcf, 4, tmpl)
@@ -278,7 +278,7 @@ block testScatter4ShardsTbi:
 # ---------------------------------------------------------------------------
 block testVcfScatter1Shard:
   ## 1 shard must equal the original (record set and order).
-  let tmpDir = getTempDir() / "paravar_scatter_vcf_1shard_test"
+  let tmpDir = getTempDir() / "vcfparty_scatter_vcf_1shard_test"
   createDir(tmpDir)
   let tmpl = tmpDir / "shard.{}.vcf.gz"
   scatter(SmallVcf, 1, tmpl)
@@ -291,7 +291,7 @@ block testVcfScatter1Shard:
 # ---------------------------------------------------------------------------
 block testScatterForceScan:
   ## scatter with forceScan=true on a fully indexed file — index is ignored.
-  let tmpDir = getTempDir() / "paravar_scatter_forcescan_test"
+  let tmpDir = getTempDir() / "vcfparty_scatter_forcescan_test"
   createDir(tmpDir)
   let tmpl = tmpDir / "shard.{}.vcf.gz"
   scatter(SmallVcf, 4, tmpl, 1, forceScan = true)
@@ -304,7 +304,7 @@ block testScatterForceScan:
 # ---------------------------------------------------------------------------
 block testScatter4ShardsCsi:
   doAssert fileExists(CsiVcf & ".csi"), "CSI fixture missing — run generate_fixtures.sh"
-  let tmpDir = getTempDir() / "paravar_scatter_csi_test"
+  let tmpDir = getTempDir() / "vcfparty_scatter_csi_test"
   createDir(tmpDir)
   let tmpl = tmpDir / "shard.{}.vcf.gz"
   scatter(CsiVcf, 4, tmpl)
@@ -470,7 +470,7 @@ proc checkBcfShards(bcfPath: string; tmpl: string; n: int) =
 # ---------------------------------------------------------------------------
 block testBcfScatter1Shard:
   doAssert fileExists(SmallBcf), &"BCF fixture missing: {SmallBcf}"
-  let tmpDir = getTempDir() / "paravar_bcf_1shard_test"
+  let tmpDir = getTempDir() / "vcfparty_bcf_1shard_test"
   createDir(tmpDir)
   let tmpl = tmpDir / "shard.{}.bcf"
   scatter(SmallBcf, 1, tmpl, format = FileFormat.Bcf)
@@ -483,7 +483,7 @@ block testBcfScatter1Shard:
 # ---------------------------------------------------------------------------
 block testBcfScatter4Shards:
   doAssert fileExists(SmallBcf), &"BCF fixture missing: {SmallBcf}"
-  let tmpDir = getTempDir() / "paravar_bcf_4shard_test"
+  let tmpDir = getTempDir() / "vcfparty_bcf_4shard_test"
   createDir(tmpDir)
   let tmpl = tmpDir / "shard.{}.bcf"
   scatter(SmallBcf, 4, tmpl, format = FileFormat.Bcf)
@@ -503,7 +503,7 @@ block testBcfScatter4Shards:
 # ---------------------------------------------------------------------------
 block testBcfScatterLargeHeader:
   doAssert fileExists(KgBcf), &"large BCF fixture missing: {KgBcf}"
-  let tmpDir = getTempDir() / "paravar_bcf_kg_test"
+  let tmpDir = getTempDir() / "vcfparty_bcf_kg_test"
   createDir(tmpDir)
   let tmpl = tmpDir / "shard.{}.bcf"
   scatter(KgBcf, 4, tmpl, format = FileFormat.Bcf)

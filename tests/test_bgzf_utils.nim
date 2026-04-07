@@ -2,7 +2,7 @@
 ## Run from project root: nim c -r tests/test_bgzf_utils.nim
 
 import std/[os, strformat]
-import "../src/paravar/bgzf_utils"
+import "../src/vcfparty/bgzf_utils"
 
 # libdeflate CRC32 — already linked via -ldeflate in bgzf_utils
 proc libdeflateCrc32(crc: cuint; buf: pointer; len: csize_t): cuint
@@ -79,7 +79,7 @@ block testRawCopyBytes:
   doAssert blkSize > 0
 
   let expected = readFileSlice(SmallVcf, starts[0], blkSize)
-  let tmpPath = getTempDir() / "paravar_test_rawcopy.bin"
+  let tmpPath = getTempDir() / "vcfparty_test_rawcopy.bin"
   let dst = open(tmpPath, fmWrite)
   rawCopyBytes(SmallVcf, dst, starts[0], blkSize.int64)
   dst.close()
@@ -296,7 +296,7 @@ block testSplitBcfBoundaryBlockZeroRecords:
   # shared data: 4 bytes of zeros (already zero)
   let blk = compressToBgzf(recData)
 
-  let tmpPath = getTempDir() / "paravar_test_bcf_1rec.bin"
+  let tmpPath = getTempDir() / "vcfparty_test_bcf_1rec.bin"
   let tf = open(tmpPath, fmWrite)
   discard tf.writeBytes(blk, 0, blk.len)
   tf.close()

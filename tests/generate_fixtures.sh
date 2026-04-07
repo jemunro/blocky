@@ -99,7 +99,7 @@ fi
 
 # ---------------------------------------------------------------------------
 # small_csi.vcf.gz — same content as small.vcf.gz but CSI indexed only.
-# No .tbi is created alongside it so paravar's index-detection falls through
+# No .tbi is created alongside it so vcfparty's index-detection falls through
 # to the .csi path — exercising parseCsiBlockStarts.
 # ---------------------------------------------------------------------------
 CSI="${DATA_DIR}/small_csi.vcf.gz"

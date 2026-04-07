@@ -1,7 +1,7 @@
 ## run — scatter a VCF into N shards and pipe each through a tool pipeline.
 ##
 ## This module is responsible for:
-##   1. Parsing the "---"-separated argv into paravar args + pipeline stages.
+##   1. Parsing the "---"-separated argv into vcfparty args + pipeline stages.
 ##   2. Building the sh -c command string for each shard.
 ##   3. Mode inference from -o / {} / --gather flags.
 ##   4. Executing per-shard pipelines concurrently up to --jobs.
@@ -31,7 +31,7 @@ proc parseRunArgv*(argv: seq[string]): (seq[string], seq[seq[string]]) =
       firstSep = i
       break
   if firstSep < 0:
-    stderr.writeLine "paravar run: at least one --- stage is required"
+    stderr.writeLine "vcfparty run: at least one --- stage is required"
     quit(1)
   let paravarArgs = argv[0 ..< firstSep]
   var stages: seq[seq[string]]
@@ -39,7 +39,7 @@ proc parseRunArgv*(argv: seq[string]): (seq[string], seq[seq[string]]) =
   for i in firstSep + 1 ..< argv.len:
     if isSep(argv[i]):
       if cur.len == 0:
-        stderr.writeLine "paravar run: empty pipeline stage"
+        stderr.writeLine "vcfparty run: empty pipeline stage"
         quit(1)
       stages.add(cur)
       cur = @[]
@@ -325,7 +325,7 @@ proc runShardsGather*(vcfPath: string; nShards: int; outputTemplate: string;
       if i == 0: cfg.outputPath
       else:
         let shardBase = shardOutputPath(cfg.outputPath, i, nShards).lastPathPart
-        cfg.tmpDir / "paravar_" & shardBase & ".tmp"
+        cfg.tmpDir / "vcfparty_" & shardBase & ".tmp"
     if i > 0:
       allTmpPaths.add(tmpPath)
     # stdin pipe:  shard writer → shell stdin

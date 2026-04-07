@@ -1,10 +1,10 @@
 ## Tests for CLI argument handling.
 ## Run from project root: nim c -r tests/test_cli.nim
-## Requires the paravar binary to be built first (nimble build).
+## Requires the vcfparty binary to be built first (nimble build).
 
 import std/[os, osproc, sequtils, strformat, strutils]
 
-const BinPath  = "./paravar"
+const BinPath  = "./vcfparty"
 const DataDir  = "tests/data"
 const SmallVcf = DataDir / "small.vcf.gz"       # TBI indexed
 const CsiVcf   = DataDir / "small_csi.vcf.gz"   # CSI indexed only
@@ -18,7 +18,7 @@ proc run(args: string): (string, int) =
 proc recordsHash(paths: seq[string]): string =
   ## Concatenate records from paths in order (bcftools view -H, full genotypes),
   ## write to temp file, return sha256sum hex digest.
-  let tmp = getTempDir() / "paravar_hash_" & $getCurrentProcessId() & ".txt"
+  let tmp = getTempDir() / "vcfparty_hash_" & $getCurrentProcessId() & ".txt"
   var f = open(tmp, fmWrite)
   for p in paths:
     let (o, _) = execCmdEx("bcftools view -H " & p & " 2>/dev/null")
@@ -50,7 +50,7 @@ block buildBinary:
 # ---------------------------------------------------------------------------
 
 block testMissingN:
-  let (outp, code) = run(&"scatter -o /tmp/paravar_cli_test {SmallVcf}")
+  let (outp, code) = run(&"scatter -o /tmp/vcfparty_cli_test {SmallVcf}")
   doAssert code != 0, "missing -n should exit non-zero"
   doAssert "n" in outp.toLowerAscii,
     &"missing -n error should mention 'n', got: {outp}"
@@ -61,7 +61,7 @@ block testMissingN:
 # ---------------------------------------------------------------------------
 
 block testInvalidN0:
-  let (_, code) = run(&"scatter -n 0 -o /tmp/paravar_cli_test {SmallVcf}")
+  let (_, code) = run(&"scatter -n 0 -o /tmp/vcfparty_cli_test {SmallVcf}")
   doAssert code != 0, "-n 0 should exit non-zero"
   echo "PASS -n 0 exits non-zero"
 
@@ -81,7 +81,7 @@ block testMissingO:
 # ---------------------------------------------------------------------------
 
 block testUnknownExtension:
-  let tmpDir = getTempDir() / "paravar_unknown_ext_test"
+  let tmpDir = getTempDir() / "vcfparty_unknown_ext_test"
   createDir(tmpDir)
   let tmpFile = tmpDir / "input.xyz"
   writeFile(tmpFile, "dummy")
@@ -97,7 +97,7 @@ block testUnknownExtension:
 
 block testBcfNoIndex:
   doAssert fileExists(SmallBcf), "BCF fixture missing — run generate_fixtures.sh"
-  let tmpDir = getTempDir() / "paravar_bcf_noindex_test"
+  let tmpDir = getTempDir() / "vcfparty_bcf_noindex_test"
   createDir(tmpDir)
   let tmpBcf = tmpDir / "noindex.bcf"
   copyFile(SmallBcf, tmpBcf)
@@ -113,7 +113,7 @@ block testBcfNoIndex:
 
 block testBcfRunForceScan:
   doAssert fileExists(SmallBcf), "BCF fixture missing — run generate_fixtures.sh"
-  let tmpDir = getTempDir() / "paravar_bcf_run_forcescan_test"
+  let tmpDir = getTempDir() / "vcfparty_bcf_run_forcescan_test"
   createDir(tmpDir)
   let (outp, code) = run(&"run -n 2 -o {tmpDir}/out.vcf.gz --force-scan {SmallBcf} --- cat")
   doAssert code != 0, "--force-scan with BCF via run should exit non-zero"
@@ -128,7 +128,7 @@ block testBcfRunForceScan:
 
 block testBcfForceScan:
   doAssert fileExists(SmallBcf), "BCF fixture missing — run generate_fixtures.sh"
-  let tmpDir = getTempDir() / "paravar_bcf_forcescan_test"
+  let tmpDir = getTempDir() / "vcfparty_bcf_forcescan_test"
   createDir(tmpDir)
   let (outp, code) = run(&"scatter -n 2 -o {tmpDir}/shard --force-scan {SmallBcf}")
   doAssert code != 0, "--force-scan with BCF should exit non-zero"
@@ -147,7 +147,7 @@ block testBcfForceScan:
 
 block testMissingIndex:
   # With no index, scatter should warn and fall back to BGZF scan automatically.
-  let tmpDir = getTempDir() / "paravar_noindex_test"
+  let tmpDir = getTempDir() / "vcfparty_noindex_test"
   createDir(tmpDir)
   let tmpVcf = tmpDir / "noindex.vcf.gz"
   copyFile(SmallVcf, tmpVcf)
@@ -166,7 +166,7 @@ block testMissingIndex:
 # ---------------------------------------------------------------------------
 
 block testForceScanFlag:
-  let tmpDir = getTempDir() / "paravar_forcescan_test"
+  let tmpDir = getTempDir() / "vcfparty_forcescan_test"
   createDir(tmpDir)
   let outp_template = tmpDir / "out.vcf.gz"
   let (runOutp, runCode) = run(&"scatter -n 4 -o {outp_template} --force-scan {SmallVcf}")
@@ -191,13 +191,13 @@ block testForceScanFlag:
 # ---------------------------------------------------------------------------
 
 block testEndToEnd:
-  let tmpDir = getTempDir() / "paravar_e2e_test"
+  let tmpDir = getTempDir() / "vcfparty_e2e_test"
   createDir(tmpDir)
   let outp_template = tmpDir / "out.vcf.gz"
 
   let (runOutp, runCode) = run(&"scatter -n 4 -o {outp_template} {SmallVcf}")
-  doAssert runCode == 0, &"paravar scatter exited non-zero:\n{runOutp}"
-  echo "PASS e2e: paravar scatter -n 4 exited 0"
+  doAssert runCode == 0, &"vcfparty scatter exited non-zero:\n{runOutp}"
+  echo "PASS e2e: vcfparty scatter -n 4 exited 0"
 
   for i in 1..4:
     let shardPath = tmpDir / ("shard_" & $i & ".out.vcf.gz")
@@ -224,12 +224,12 @@ block testEndToEnd:
 
 block testCsiIndex:
   doAssert fileExists(CsiVcf), "CSI fixture missing — run generate_fixtures.sh"
-  let tmpDir = getTempDir() / "paravar_csi_test"
+  let tmpDir = getTempDir() / "vcfparty_csi_test"
   createDir(tmpDir)
   let outp_template = tmpDir / "out.vcf.gz"
 
   let (runOutp, runCode) = run(&"scatter -n 4 -o {outp_template} {CsiVcf}")
-  doAssert runCode == 0, &"paravar scatter (CSI) exited non-zero:\n{runOutp}"
+  doAssert runCode == 0, &"vcfparty scatter (CSI) exited non-zero:\n{runOutp}"
 
   proc countRec(path: string): int =
     let (o, _) = execCmdEx("bcftools view -HG " & path & " 2>/dev/null | wc -l")
@@ -255,7 +255,7 @@ block testCsiIndex:
 
 block testBcfExtension:
   doAssert fileExists(SmallBcf), "BCF fixture missing — run generate_fixtures.sh"
-  let tmpDir = getTempDir() / "paravar_bcf_ext_test"
+  let tmpDir = getTempDir() / "vcfparty_bcf_ext_test"
   createDir(tmpDir)
   let outp_template = tmpDir / "out.bcf"
   let (outp, code) = run(&"scatter -n 4 -o {outp_template} {SmallBcf}")
@@ -280,13 +280,13 @@ block testKg1000Genomes:
   if not fileExists(KgVcf):
     echo "SKIP 1KG chr22: file not present (run tests/generate_fixtures.sh)"
   else:
-    let tmpDir = getTempDir() / "paravar_kg_test"
+    let tmpDir = getTempDir() / "vcfparty_kg_test"
     createDir(tmpDir)
     let outp_template = tmpDir / "out.vcf.gz"
 
     let (runOutp, runCode) = run(&"scatter -n 10 -o {outp_template} {KgVcf}")
-    doAssert runCode == 0, &"paravar scatter (1KG) exited non-zero:\n{runOutp}"
-    echo "PASS 1KG: paravar scatter -n 10 exited 0"
+    doAssert runCode == 0, &"vcfparty scatter (1KG) exited non-zero:\n{runOutp}"
+    echo "PASS 1KG: vcfparty scatter -n 10 exited 0"
 
     # With -n 10, nDigits=2 so names are shard_01.out.vcf.gz … shard_10.out.vcf.gz
     for i in 1..10:
