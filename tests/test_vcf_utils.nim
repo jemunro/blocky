@@ -1,8 +1,8 @@
-## Tests for bgzf_utils.nim.
-## Run from project root: nim c -r tests/test_bgzf_utils.nim
+## Tests for vcf_utils.nim.
+## Run from project root: nim c -r tests/test_vcf_utils.nim
 
 import std/[os, strformat]
-import "../src/vcfparty/bgzf_utils"
+import "../src/vcfparty/vcf_utils"
 
 # libdeflate CRC32 — already linked via -ldeflate in bgzf_utils
 proc libdeflateCrc32(crc: cuint; buf: pointer; len: csize_t): cuint

@@ -46,11 +46,12 @@ task test, "Run all tests":
   exec "nimble build"   # triggers before build hook → buildLibdeflate + nim compile
   # Clear test nimcaches so source changes in imported modules are picked up.
   exec "rm -rf nimcache/tests"
-  exec "nim c --hints:off -r tests/test_bgzf_utils.nim"
+  exec "nim c --hints:off -r tests/test_vcf_utils.nim"
   exec "nim c --hints:off -r tests/test_scatter.nim"
   exec "nim c --hints:off -r tests/test_run.nim"
   exec "nim c --hints:off -r tests/test_merge.nim"
   exec "nim c --hints:off -r tests/test_collect.nim"
   exec "nim c --hints:off -r tests/test_gather.nim"
+  exec "nim c --hints:off --path:src/vcfparty -r tests/test_sniff.nim"
   exec "nim c --hints:off -r tests/test_cli.nim"
   # exec "testament pattern 'tests/test_*.nim'"

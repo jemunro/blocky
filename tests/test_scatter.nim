@@ -3,7 +3,7 @@
 ## Run from project root: nim c -r tests/test_scatter.nim
 
 import std/[algorithm, os, strformat, strutils]
-import "../src/vcfparty/bgzf_utils"
+import "../src/vcfparty/vcf_utils"
 import "../src/vcfparty/scatter"
 
 const DataDir  = "tests/data"
@@ -460,7 +460,7 @@ block testBcfScatter4Shards:
   let tmpDir = getTempDir() / "vcfparty_bcf_4shard_test"
   createDir(tmpDir)
   let tmpl = tmpDir / "shard.{}.bcf"
-  scatter(SmallBcf, 4, tmpl, format = FileFormat.Bcf)
+  scatter(SmallBcf, 4, tmpl, format = ffBcf)
   checkBcfShards(SmallBcf, tmpl, 4)
   var sizes: seq[int64]
   for i in 0..3:
@@ -480,7 +480,7 @@ block testBcfScatterLargeHeader:
   let tmpDir = getTempDir() / "vcfparty_bcf_kg_test"
   createDir(tmpDir)
   let tmpl = tmpDir / "shard.{}.bcf"
-  scatter(KgBcf, 4, tmpl, format = FileFormat.Bcf)
+  scatter(KgBcf, 4, tmpl, format = ffBcf)
   checkBcfShards(KgBcf, tmpl, 4)
   echo "PASS BCF scatter chr22_1kg.bcf 4 shards: large header handled correctly"
   removeDir(tmpDir)

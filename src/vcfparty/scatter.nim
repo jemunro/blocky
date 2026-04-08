@@ -10,7 +10,7 @@ import std/[algorithm, cpuinfo, os, posix, sequtils, sets, strformat, strutils]
 {.warning[Deprecated]: off.}
 import std/threadpool
 {.warning[Deprecated]: on.}
-import bgzf_utils
+import vcf_utils
 
 # ---------------------------------------------------------------------------
 # Optional info-level logging (enabled by --info flag via main.nim)
@@ -37,13 +37,7 @@ proc shardOutputPath*(tmpl: string; shardIdx: int; nShards: int): string =
   let prefixed = "shard_" & padded & "." & base
   result = if dir.len == 0: prefixed else: dir / prefixed
 
-# ---------------------------------------------------------------------------
-# Format detection
-# ---------------------------------------------------------------------------
-
-type FileFormat* = enum
-  Vcf  ## bgzipped VCF (.vcf.gz, TBI or CSI indexed)
-  Bcf  ## bgzipped BCF (.bcf, CSI indexed)
+# FileFormat and Compression are imported from vcf_utils.
 
 # ---------------------------------------------------------------------------
 # Internal binary-reader helpers (little-endian reads that advance a cursor)
@@ -366,7 +360,7 @@ proc isValidBcfBoundary(bcfPath: string; start: int64; length: int64): bool =
 
 proc optimiseBoundaries*(vcfPath: string; startsIn: seq[int64]; nShards: int;
                           nThreads: int = 1;
-                          format: FileFormat = Vcf): (seq[int], seq[int64], seq[int64]) =
+                          format: FileFormat = ffVcf): (seq[int], seq[int64], seq[int64]) =
   ## Find shard boundary block indices that produce roughly equal-size parts.
   ## Single-pass algorithm:
   ##   1. Compute initial partition from coarse block starts.
@@ -409,7 +403,7 @@ proc optimiseBoundaries*(vcfPath: string; startsIn: seq[int64]; nShards: int;
   # Validate boundaries; fix any invalid one by scanning neighbours.
   for i in 0 ..< bounds.len:
     let isValid = proc(bi: int): bool =
-      if format == Bcf: isValidBcfBoundary(vcfPath, allStarts[bi], lengths[bi])
+      if format == ffBcf: isValidBcfBoundary(vcfPath, allStarts[bi], lengths[bi])
       else:             isValidBoundary(vcfPath, allStarts[bi], lengths[bi])
     if not isValid(bounds[i]):
       var fixed = false
@@ -503,7 +497,7 @@ proc doWriteShard*(task: ShardTask): int {.gcsafe.} =
 
 proc computeShards*(vcfPath: string; nShards: int; nThreads: int = 1;
                     forceScan: bool = false;
-                    format: FileFormat = Vcf): seq[ShardTask] =
+                    format: FileFormat = ffVcf): seq[ShardTask] =
   ## Compute per-shard byte ranges and prepend buffers for vcfPath.
   ## Returns nShards ShardTask objects with outFd = -1 and logLine = "".
   ## Caller must set task.outFd before calling doWriteShard.
@@ -514,7 +508,7 @@ proc computeShards*(vcfPath: string; nShards: int; nThreads: int = 1;
   var firstBlock: int64
   var starts: seq[int64]
 
-  if format == Bcf:
+  if format == ffBcf:
     # BCF: CSI index required; no TBI fallback; no auto-scan.
     # Use full CSI virtual offsets (block_off, u_off) for record-exact splitting.
     let csi = vcfPath & ".csi"
@@ -617,7 +611,7 @@ proc computeShards*(vcfPath: string; nShards: int; nThreads: int = 1;
     optimiseBoundaries(vcfPath, starts, nShards, nThreads, format = format)
 
   var splits: seq[SplitPair]
-  if format == Bcf:
+  if format == ffBcf:
     if nThreads > 1 and bounds.len > 0:
       var splitFVs = newSeq[FlowVar[SplitPair]](bounds.len)
       for idx, bi in bounds:
@@ -650,7 +644,7 @@ proc computeShards*(vcfPath: string; nShards: int; nThreads: int = 1;
     if i == 0:
       if (bounds.len == 0 or finalStarts[0] < finalStarts[bounds[0]]) and
          finalStarts.len >= 2:
-        if format == Bcf:
+        if format == ffBcf:
           prepend.add(removeBcfHeaderBytes(vcfPath))
         else:
           prepend.add(removeHeaderLines(vcfPath, 0, finalStarts[1]))
@@ -672,12 +666,12 @@ proc computeShards*(vcfPath: string; nShards: int; nThreads: int = 1;
 
 proc scatter*(vcfPath: string; nShards: int; outputTemplate: string;
               nThreads: int = 1; forceScan: bool = false;
-              format: FileFormat = Vcf; decompress: bool = false) =
+              format: FileFormat = ffVcf; decompress: bool = false) =
   ## Split vcfPath into nShards bgzipped files.
   ## outputTemplate may contain {} (replaced with zero-padded shard number)
   ## or not (shard_NN. is prepended to the basename). mkdir -p is applied.
   ## nThreads controls parallelism; pass 0 to use all CPUs.
-  ## When decompress is true, shard files are written as uncompressed VCF/BCF.
+  ## When decompress is true, shard files are written as uncompressed bytes (-Ou).
   let actualThreads = if nThreads == 0: countProcessors() else: nThreads
   setMaxPoolSize(actualThreads)
   info(&"scatter: using {actualThreads} thread(s)")

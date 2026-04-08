@@ -1,9 +1,27 @@
-## bgzf_utils — low-level BGZF block parsing and I/O.
+## vcf_utils — BGZF I/O, VCF/BCF format types, and format sniffing.
 ##
 ## Only external dependency: libdeflate (-ldeflate), no htslib required.
 ## All proc signatures use explicit types per project style guide.
 
 import std/[strformat]
+
+# ---------------------------------------------------------------------------
+# Format types
+# ---------------------------------------------------------------------------
+
+type
+  FileFormat* = enum
+    ffVcf, ffBcf, ffText
+
+  Compression* = enum
+    compBgzf, compNone
+
+proc `$`*(f: FileFormat): string =
+  ## Human-readable format name for messages.
+  case f
+  of ffVcf:  "VCF"
+  of ffBcf:  "BCF"
+  of ffText: "text"
 
 # ---------------------------------------------------------------------------
 # Public constants
@@ -17,6 +35,9 @@ const BGZF_EOF* = [
 ]
 
 const BCF_MAGIC* = [byte('B'), byte('C'), byte('F'), 0x02'u8, 0x02'u8]
+
+## BGZF magic: gzip header with FEXTRA flag (1f 8b 08 04).
+const BGZF_MAGIC* = [0x1f'u8, 0x8b'u8, 0x08'u8, 0x04'u8]
 
 ## Byte overhead per BGZF block: 18-byte header + 4-byte CRC32 + 4-byte ISIZE.
 const BGZF_OVERHEAD* = 26
@@ -499,3 +520,57 @@ proc removeHeaderLines*(path: string; offset: int64; size: int64): seq[byte] =
     if partial.len > 0 and partial[0] != byte('#'):
       records.add(partial)
   result = compressToBgzfMulti(records)
+
+# ---------------------------------------------------------------------------
+# Format sniffing
+# ---------------------------------------------------------------------------
+
+proc isBgzfStream*(firstBytes: openArray[byte]): bool =
+  ## Return true if firstBytes begins with a BGZF block header (magic 1f 8b 08 04).
+  firstBytes.len >= BGZF_MAGIC.len and
+  firstBytes[0] == BGZF_MAGIC[0] and firstBytes[1] == BGZF_MAGIC[1] and
+  firstBytes[2] == BGZF_MAGIC[2] and firstBytes[3] == BGZF_MAGIC[3]
+
+proc sniffFormat*(firstBytes: openArray[byte]): FileFormat =
+  ## Detect format from uncompressed first bytes of a stream.
+  ## BCF\x02\x02 → ffBcf; ##fileformat → ffVcf; anything else → ffText.
+  if firstBytes.len >= BCF_MAGIC.len and
+     firstBytes[0] == BCF_MAGIC[0] and firstBytes[1] == BCF_MAGIC[1] and
+     firstBytes[2] == BCF_MAGIC[2] and firstBytes[3] == BCF_MAGIC[3] and
+     firstBytes[4] == BCF_MAGIC[4]:
+    return ffBcf
+  const vcfMagic = "##fileformat"
+  if firstBytes.len >= vcfMagic.len:
+    var match = true
+    for i in 0 ..< vcfMagic.len:
+      if firstBytes[i] != byte(vcfMagic[i]):
+        match = false
+        break
+    if match:
+      return ffVcf
+  result = ffText
+
+proc sniffStreamFormat*(rawHead: openArray[byte]): (FileFormat, bool) =
+  ## Detect format and stream compression from the first bytes of a pipeline stdout.
+  ## rawHead must contain at least the first complete BGZF block if the stream is BGZF.
+  ## Returns (format, isBgzf).
+  if isBgzfStream(rawHead):
+    let decompressed = decompressBgzf(rawHead)
+    result = (sniffFormat(decompressed), true)
+  else:
+    result = (sniffFormat(rawHead), false)
+
+proc sniffFileFormat*(path: string): (FileFormat, bool) =
+  ## Detect format and compression of a file on disk by reading its first bytes.
+  ## Returns (ffVcf|ffBcf, isCompressed). Exits 1 on I/O error.
+  var f: File
+  if not open(f, path, fmRead):
+    stderr.writeLine "error: cannot open file: " & path
+    quit(1)
+  var head: array[65536, byte]
+  let nRead = f.readBytes(head, 0, head.len)
+  f.close()
+  if nRead == 0:
+    stderr.writeLine "error: file is empty: " & path
+    quit(1)
+  result = sniffStreamFormat(head[0 ..< nRead])

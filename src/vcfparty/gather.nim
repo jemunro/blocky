@@ -1,29 +1,24 @@
 ## gather — format inference, interceptor, and concatenation for --gather.
 ##
 ## Implements the gather pipeline:
-##   inferGatherFormat → GatherConfig → runInterceptor (per shard) → concatenateShards
+##   inferFileFormat → GatherConfig → runInterceptor (per shard) → concatenateShards
 
 import std/[heapqueue, options, os, strformat, strutils]
 import std/posix
 {.warning[Deprecated]: off.}
 import std/threadpool
 {.warning[Deprecated]: on.}
-import bgzf_utils
+import vcf_utils
+export vcf_utils
 
 # ---------------------------------------------------------------------------
 # Types
 # ---------------------------------------------------------------------------
 
 type
-  GatherFormat* = enum
-    gfVcf, gfBcf, gfText
-
-  GatherCompression* = enum
-    gcBgzf, gcUncompressed
-
   GatherConfig* = object
-    format*:        GatherFormat
-    compression*:   GatherCompression
+    format*:        FileFormat
+    compression*:   Compression
     outputPath*:    string
     tmpDir*:        string
     headerPattern*: Option[string]   ## --header-pattern; None = not set
@@ -31,21 +26,14 @@ type
     shardCount*:    int
     toStdout*:      bool             ## write output to stdout instead of outputPath
 
-proc `$`*(f: GatherFormat): string =
-  ## Human-readable format name for messages.
-  case f
-  of gfVcf:  "VCF"
-  of gfBcf:  "BCF"
-  of gfText: "text"
-
 # ---------------------------------------------------------------------------
 # Format inference
 # ---------------------------------------------------------------------------
 
-proc inferGatherFormat*(path: string; fmtOverride: string): (GatherFormat, GatherCompression) =
+proc inferFileFormat*(path: string; fmtOverride: string): (FileFormat, Compression) =
   ## Infer format and compression from the gather output path extension.
   ## fmtOverride ("vcf", "bcf", "txt") overrides format when non-empty; exits 1 if invalid.
-  ## Compression: .gz / .bgz / .bcf → gcBgzf; anything else → gcUncompressed.
+  ## Compression: .gz / .bgz / .bcf → compBgzf; anything else → compNone.
   ## Format (when no override):
   ##   .vcf.gz / .vcf.bgz → VCF+BGZF
   ##   .vcf               → VCF+Uncompressed
@@ -55,31 +43,31 @@ proc inferGatherFormat*(path: string; fmtOverride: string): (GatherFormat, Gathe
 
   # Compression is solely determined by the output path extension.
   let compression =
-    if path.endsWith(".gz") or path.endsWith(".bgz") or path.endsWith(".bcf"): gcBgzf
-    else: gcUncompressed
+    if path.endsWith(".gz") or path.endsWith(".bgz") or path.endsWith(".bcf"): compBgzf
+    else: compNone
 
   # Format is from override if supplied; otherwise inferred from extension.
-  var fmt: GatherFormat
+  var fmt: FileFormat
   if fmtOverride != "":
     case fmtOverride
-    of "vcf": fmt = gfVcf
-    of "bcf": fmt = gfBcf
-    of "txt": fmt = gfText
+    of "vcf": fmt = ffVcf
+    of "bcf": fmt = ffBcf
+    of "txt": fmt = ffText
     else:
       stderr.writeLine &"error: --gather-fmt: invalid value '{fmtOverride}'" &
         " (expected vcf, bcf, or txt)"
       quit(1)
   else:
     if path.endsWith(".vcf.gz") or path.endsWith(".vcf.bgz"):
-      fmt = gfVcf
+      fmt = ffVcf
     elif path.endsWith(".vcf"):
-      fmt = gfVcf
+      fmt = ffVcf
     elif path.endsWith(".bcf"):
-      fmt = gfBcf
+      fmt = ffBcf
     elif path.endsWith(".gz") or path.endsWith(".bgz"):
-      fmt = gfText
+      fmt = ffText
     else:
-      fmt = gfText  # unknown extension → text, no error
+      fmt = ffText  # unknown extension → text, no error
 
   result = (fmt, compression)
 
@@ -93,49 +81,12 @@ proc validateGatherConfig*(cfg: GatherConfig) =
   if cfg.headerPattern.isSome and cfg.headerN.isSome:
     stderr.writeLine "error: --header-pattern and --header-n are mutually exclusive"
     quit(1)
-  if cfg.format in {gfVcf, gfBcf} and (cfg.headerPattern.isSome or cfg.headerN.isSome):
+  if cfg.format in {ffVcf, ffBcf} and (cfg.headerPattern.isSome or cfg.headerN.isSome):
     stderr.writeLine "error: --header-pattern and --header-n are only valid for text " &
       "format; VCF and BCF headers are stripped automatically"
     quit(1)
 
-# ---------------------------------------------------------------------------
-# G2 — Format sniffing
-# ---------------------------------------------------------------------------
-
-proc isBgzfStream*(firstBytes: openArray[byte]): bool =
-  ## Return true if firstBytes begins with a BGZF block header (magic 1f 8b 08 04).
-  firstBytes.len >= 4 and
-  firstBytes[0] == 0x1f'u8 and firstBytes[1] == 0x8b'u8 and
-  firstBytes[2] == 0x08'u8 and firstBytes[3] == 0x04'u8
-
-proc sniffFormat*(firstBytes: openArray[byte]): GatherFormat =
-  ## Detect format from uncompressed first bytes of a stream.
-  ## BCF\x02\x02 → gfBcf; ##fileformat → gfVcf; anything else → gfText.
-  if firstBytes.len >= 5 and
-     firstBytes[0] == byte('B') and firstBytes[1] == byte('C') and
-     firstBytes[2] == byte('F') and firstBytes[3] == 0x02'u8 and
-     firstBytes[4] == 0x02'u8:
-    return gfBcf
-  const vcfMagic = "##fileformat"
-  if firstBytes.len >= vcfMagic.len:
-    var match = true
-    for i in 0 ..< vcfMagic.len:
-      if firstBytes[i] != byte(vcfMagic[i]):
-        match = false
-        break
-    if match:
-      return gfVcf
-  result = gfText
-
-proc sniffStreamFormat*(rawHead: openArray[byte]): (GatherFormat, bool) =
-  ## Detect format and stream compression from the first bytes of a pipeline stdout.
-  ## rawHead must contain at least the first complete BGZF block if the stream is BGZF.
-  ## Returns (format, isBgzf).
-  if isBgzfStream(rawHead):
-    let decompressed = decompressBgzf(rawHead)
-    result = (sniffFormat(decompressed), true)
-  else:
-    result = (sniffFormat(rawHead), false)
+# isBgzfStream, sniffFormat, sniffStreamFormat, sniffFileFormat are in vcf_utils.
 
 # ---------------------------------------------------------------------------
 # G2 — GC-safe cross-thread shared buffer type
@@ -153,15 +104,19 @@ type SharedBuf* = object
 # G2 — Global detected format (set by shard 0 interceptor, read by shards 1..N)
 # ---------------------------------------------------------------------------
 
-var gDetectedFormat*: GatherFormat   ## Format detected from shard 0 stream.
+var gDetectedFormat*: FileFormat   ## Format detected from shard 0 stream.
 var gStreamIsBgzf*:   bool = false   ## Whether shard 0 stream was BGZF-compressed.
 ## gChromLine — #CHROM line captured by shard 0. gChromLine.ready also serves
 ## as the format-detection release flag for shards 1..N: they spin on it before
 ## reading gDetectedFormat or gStreamIsBgzf.
 var gChromLine*: SharedBuf
 
+## C4: expected output format letter (z/v/b/u) set by runRun before orchestrator.
+## '\0' means no -O flag; non-'\0' triggers format validation in shard 0 interceptor.
+var gExpectedOutputFmt*: char = '\0'
+
 ## M5 merge globals — set by shard 0 feeder, read by main thread.
-var gMergeFormat*:     GatherFormat = gfVcf
+var gMergeFormat*:     FileFormat = ffVcf
 var gMergeHeader*:     SharedBuf
 var gMergeBgzfWarned*: bool = false
 
@@ -373,7 +328,7 @@ proc readNextBcfRecord*(fd: cint): seq[byte] =
 # M3 — Sort key extraction from a single record
 # ---------------------------------------------------------------------------
 
-proc extractSortKey*(record: seq[byte]; fmt: GatherFormat;
+proc extractSortKey*(record: seq[byte]; fmt: FileFormat;
                      contigTable: seq[string]): (int, int32) =
   ## Return (contig_rank, pos) for a single uncompressed record.
   ## contig_rank is the 0-based index of CHROM in contigTable, or high(int) if not found.
@@ -382,7 +337,7 @@ proc extractSortKey*(record: seq[byte]; fmt: GatherFormat;
   ## For VCF: CHROM is the first tab-delimited field; POS is the second field.
   ## Returns (high(int), 0) on parse error or empty record.
   if record.len == 0: return (high(int), 0'i32)
-  if fmt == gfBcf:
+  if fmt == ffBcf:
     if record.len < 16: return (high(int), 0'i32)
     let chromId = int32(record[8].uint32 or (record[9].uint32 shl 8) or
                         (record[10].uint32 shl 16) or (record[11].uint32 shl 24))
@@ -428,7 +383,7 @@ proc `<`(a, b: MergeEntry): bool {.inline.} =
   if a.rank != b.rank: return a.rank < b.rank
   a.pos < b.pos
 
-proc kWayMerge*(fds: seq[cint]; outFd: cint; fmt: GatherFormat;
+proc kWayMerge*(fds: seq[cint]; outFd: cint; fmt: FileFormat;
                 contigTable: seq[string]) =
   ## k-way priority-queue merge of N sorted, uncompressed, header-stripped record
   ## streams. Each fd must produce VCF lines (\n-terminated) or raw BCF binary
@@ -438,7 +393,7 @@ proc kWayMerge*(fds: seq[cint]; outFd: cint; fmt: GatherFormat;
   var heap = initHeapQueue[MergeEntry]()
 
   template nextRec(fd: cint): seq[byte] =
-    if fmt == gfBcf: readNextBcfRecord(fd)
+    if fmt == ffBcf: readNextBcfRecord(fd)
     else:            readNextVcfRecord(fd)
 
   # Seed the heap with the first record from each stream.
@@ -488,11 +443,11 @@ proc extractChromLine*(data: seq[byte]): string =
     i = j + 1
   return ""
 
-proc chromLineFromBytes*(rawBytes: seq[byte]; fmt: GatherFormat; isBgzf: bool): string =
+proc chromLineFromBytes*(rawBytes: seq[byte]; fmt: FileFormat; isBgzf: bool): string =
   ## Extract the #CHROM line from raw (possibly BGZF-compressed) shard bytes.
   ## Decompresses only enough BGZF blocks to find the header boundary.
   ## Returns "" for text format or if not found.
-  if fmt == gfText: return ""
+  if fmt == ffText: return ""
   if isBgzf:
     var decompBuf: seq[byte]
     var pos = 0
@@ -502,22 +457,22 @@ proc chromLineFromBytes*(rawBytes: seq[byte]; fmt: GatherFormat; isBgzf: bool): 
       decompBuf.add(decompressBgzf(rawBytes.toOpenArray(pos, pos + blkSize - 1)))
       pos += blkSize
       let hEnd =
-        if fmt == gfBcf: findBcfHeaderEnd(decompBuf)
+        if fmt == ffBcf: findBcfHeaderEnd(decompBuf)
         else:            findVcfHeaderEnd(decompBuf)
       if hEnd >= 0:
         return extractChromLine(decompBuf[0 ..< hEnd])
     return extractChromLine(decompBuf)
   else:
     let hEnd =
-      if fmt == gfBcf: findBcfHeaderEnd(rawBytes)
+      if fmt == ffBcf: findBcfHeaderEnd(rawBytes)
       else:            findVcfHeaderEnd(rawBytes)
     let limit = if hEnd >= 0: hEnd else: rawBytes.len
     return extractChromLine(rawBytes[0 ..< limit])
 
-proc chromLineFromFile*(path: string; fmt: GatherFormat; isBgzf: bool): string =
+proc chromLineFromFile*(path: string; fmt: FileFormat; isBgzf: bool): string =
   ## Read just enough bytes from path to extract the #CHROM line.
   ## Returns "" for text format or if not found within the header.
-  if fmt == gfText: return ""
+  if fmt == ffText: return ""
   let f = open(path, fmRead)
   defer: f.close()
   const BufSize = 65536
@@ -535,7 +490,7 @@ proc chromLineFromFile*(path: string; fmt: GatherFormat; isBgzf: bool): string =
       decompBuf.add(decompressBgzf(rawBuf.toOpenArray(blockPos, blockPos + blkSize - 1)))
       blockPos += blkSize
     let hEnd =
-      if fmt == gfBcf: findBcfHeaderEnd(decompBuf)
+      if fmt == ffBcf: findBcfHeaderEnd(decompBuf)
       else:            findVcfHeaderEnd(decompBuf)
     if hEnd >= 0:
       return extractChromLine(decompBuf[0 ..< hEnd])
@@ -544,7 +499,7 @@ proc chromLineFromFile*(path: string; fmt: GatherFormat; isBgzf: bool): string =
 proc extractInputHeaderBytes*(path: string): seq[byte] =
   ## Read and return the decompressed header bytes (up to first data record)
   ## from a VCF.gz or BCF input file.  BGZF blocks are decompressed in chunks.
-  let fmt = if path.endsWith(".bcf"): gfBcf else: gfVcf
+  let fmt = if path.endsWith(".bcf"): ffBcf else: ffVcf
   let f = open(path, fmRead)
   defer: f.close()
   const BufSize = 65536
@@ -562,7 +517,7 @@ proc extractInputHeaderBytes*(path: string): seq[byte] =
       decompBuf.add(decompressBgzf(rawBuf.toOpenArray(blockPos, blockPos + blkSize - 1)))
       blockPos += blkSize
     let hEnd =
-      if fmt == gfBcf: findBcfHeaderEnd(decompBuf)
+      if fmt == ffBcf: findBcfHeaderEnd(decompBuf)
       else:            findVcfHeaderEnd(decompBuf)
     if hEnd >= 0: return decompBuf[0 ..< hEnd]
   result = decompBuf
@@ -580,23 +535,23 @@ proc stripTrailingEof*(bytes: seq[byte]): seq[byte] =
     bytes
 
 proc writeShardZero*(outFile: File; bytes: seq[byte]; isBgzf: bool;
-                     compression: GatherCompression) =
+                     compression: Compression) =
   ## Write shard 0 to outFile: no header stripping, recompress as needed.
   ## bytes must already have the trailing BGZF EOF block removed.
   let toWrite: seq[byte] =
-    if isBgzf and compression == gcUncompressed:
+    if isBgzf and compression == compNone:
       decompressAllBgzfBlocks(bytes)
-    elif not isBgzf and compression == gcBgzf:
+    elif not isBgzf and compression == compBgzf:
       compressToBgzfMulti(bytes)
     else:
       bytes
   discard outFile.writeBytes(toWrite, 0, toWrite.len)
 
-proc writeShardData*(outFile: File; bytes: seq[byte]; fmt: GatherFormat;
+proc writeShardData*(outFile: File; bytes: seq[byte]; fmt: FileFormat;
                      isBgzf: bool; cfg: GatherConfig) =
   ## Write one shard 1..N to outFile: strip headers and recompress as needed.
   ## bytes must already have the trailing BGZF EOF block removed.
-  if isBgzf and fmt in {gfVcf, gfBcf}:
+  if isBgzf and fmt in {ffVcf, ffBcf}:
     # Optimised path: decompress only the header-containing blocks, then
     # raw-copy (or decompress-and-write) the remaining data blocks.
     var blockPos = 0
@@ -612,19 +567,19 @@ proc writeShardData*(outFile: File; bytes: seq[byte]; fmt: GatherFormat;
         decompressBgzf(bytes.toOpenArray(blockPos, blockPos + blkSize - 1)))
       blockPos += blkSize
       headerEnd =
-        if fmt == gfBcf: findBcfHeaderEnd(decompAccum)
+        if fmt == ffBcf: findBcfHeaderEnd(decompAccum)
         else:             findVcfHeaderEnd(decompAccum)
     if headerEnd < 0: headerEnd = decompAccum.len  # edge: all-header shard
     let tail = decompAccum[headerEnd ..< decompAccum.len]
     if tail.len > 0:
       let chunk =
-        if cfg.compression == gcBgzf: compressToBgzfMulti(tail)
+        if cfg.compression == compBgzf: compressToBgzfMulti(tail)
         else: tail
       discard outFile.writeBytes(chunk, 0, chunk.len)
     while blockPos < bytes.len:
       let blkSize = bgzfBlockSize(bytes.toOpenArray(blockPos, bytes.high))
       if blkSize <= 0: break
-      if cfg.compression == gcBgzf:
+      if cfg.compression == compBgzf:
         discard outFile.writeBytes(bytes, blockPos, blkSize)
       else:
         let d = decompressBgzf(bytes.toOpenArray(blockPos, blockPos + blkSize - 1))
@@ -637,9 +592,9 @@ proc writeShardData*(outFile: File; bytes: seq[byte]; fmt: GatherFormat;
       else: bytes
     let stripped: seq[byte] =
       case fmt
-      of gfBcf: stripBcfHeader(data)
-      of gfVcf: stripLinesByPattern(data, "#")
-      of gfText:
+      of ffBcf: stripBcfHeader(data)
+      of ffVcf: stripLinesByPattern(data, "#")
+      of ffText:
         if cfg.headerPattern.isSome:
           stripLinesByPattern(data, cfg.headerPattern.get)
         elif cfg.headerN.isSome:
@@ -647,7 +602,7 @@ proc writeShardData*(outFile: File; bytes: seq[byte]; fmt: GatherFormat;
         else:
           data
     let toWrite: seq[byte] =
-      if cfg.compression == gcBgzf: compressToBgzfMulti(stripped)
+      if cfg.compression == compBgzf: compressToBgzfMulti(stripped)
       else: stripped
     discard outFile.writeBytes(toWrite, 0, toWrite.len)
 
@@ -704,6 +659,16 @@ proc runInterceptor*(cfg: GatherConfig; shardIdx: int; inputFd: cint; tmpPath: s
       for k in 0 ..< gChromLine.len.int:
         gChromLine.buf[k] = byte(chromStr[k])
       gChromLine.ready = true
+      # C4: validate pipeline output format against -O letter if provided.
+      if gExpectedOutputFmt != '\0':
+        let expected = if gExpectedOutputFmt in {'z', 'v'}: ffVcf else: ffBcf
+        if gDetectedFormat != expected:
+          let expName = if expected == ffVcf: "VCF" else: "BCF"
+          stderr.writeLine "error: -O" & gExpectedOutputFmt &
+            ": pipeline output is " & $gDetectedFormat &
+            " but -O" & gExpectedOutputFmt & " expects " & expName &
+            "; format conversion is the pipeline's responsibility"
+          quit(1)
       # Shard 0: no header stripping; apply recompression only.
       # Strip the terminal EOF block appended by the pipeline —
       # concatenateShards writes a single EOF block once at the very end.
@@ -717,7 +682,7 @@ proc runInterceptor*(cfg: GatherConfig; shardIdx: int; inputFd: cint; tmpPath: s
         sleep(1)
       let fmt = gDetectedFormat
       # Validate #CHROM before writing anything.
-      if fmt in {gfVcf, gfBcf}:
+      if fmt in {ffVcf, ffBcf}:
         let myChromLine = chromLineFromBytes(allBytes, fmt, gStreamIsBgzf)
         let glen = gChromLine.len.int
         var match = (myChromLine.len == glen)
@@ -758,12 +723,12 @@ proc cleanupTempDir*(tmpDir: string; tmpPaths: seq[string]; success: bool) =
 
 proc concatenateShards*(cfg: GatherConfig; tmpPaths: seq[string]) =
   ## Raw-copy each temp shard file (in order) into cfg.outputPath (or stdout).
-  ## Appends a single BGZF EOF block at the end when cfg.compression == gcBgzf.
+  ## Appends a single BGZF EOF block at the end when cfg.compression == compBgzf.
   ## Calls cleanupTempDir on success.
   let outFile: File = if cfg.toStdout: stdout else: open(cfg.outputPath, fmAppend)
   for p in tmpPaths:
     rawCopyBytes(p, outFile, 0, getFileSize(p))
-  if cfg.compression == gcBgzf:
+  if cfg.compression == compBgzf:
     discard outFile.writeBytes(BGZF_EOF, 0, BGZF_EOF.len)
   if not cfg.toStdout: outFile.close()
   cleanupTempDir(cfg.tmpDir, tmpPaths, true)
@@ -781,7 +746,7 @@ proc gatherFiles*(cfg: GatherConfig; inputPaths: seq[string]) =
     stderr.writeLine "error: gather: no input files provided"
     quit(1)
   gChromLine.ready = false
-  gDetectedFormat = gfText
+  gDetectedFormat = ffText
   gStreamIsBgzf   = false
   gChromLine.len   = 0
 
@@ -800,7 +765,7 @@ proc gatherFiles*(cfg: GatherConfig; inputPaths: seq[string]) =
     stderr.writeLine &"warning: shard 0 format detected as {fmt} " &
       &"but output expects {cfg.format}; proceeding"
 
-  if fmt in {gfVcf, gfBcf}:
+  if fmt in {ffVcf, ffBcf}:
     let chrom0 = chromLineFromBytes(s0Bytes, fmt, isBgzf)
     for j in 1 ..< inputPaths.len:
       let chromJ = chromLineFromFile(inputPaths[j], fmt, isBgzf)
@@ -828,7 +793,7 @@ proc gatherFiles*(cfg: GatherConfig; inputPaths: seq[string]) =
     let bytes = if isBgzf: stripTrailingEof(allBytes) else: allBytes
     writeShardData(outFile, bytes, fmt, isBgzf, cfg)
 
-  if cfg.compression == gcBgzf:
+  if cfg.compression == compBgzf:
     discard outFile.writeBytes(BGZF_EOF, 0, BGZF_EOF.len)
   if not cfg.toStdout: outFile.close()
 
@@ -844,7 +809,7 @@ proc doFileFeeder(shardIdx: int; path: string; relayWriteFd: cint): int {.gcsafe
   var raw     = newSeq[byte](ReadSize)
   var pending: seq[byte]
   var isBgzf  = false
-  var fmt     = gfVcf
+  var fmt     = ffVcf
   var rawAccum: seq[byte]
   var bgzfPos = 0
 
@@ -852,7 +817,7 @@ proc doFileFeeder(shardIdx: int; path: string; relayWriteFd: cint): int {.gcsafe
   if fileFd < 0:
     discard posix.close(relayWriteFd)
     if shardIdx == 0:
-      gMergeFormat      = gfVcf
+      gMergeFormat      = ffVcf
       gMergeHeader.ready = true
     return 1
 
@@ -861,7 +826,7 @@ proc doFileFeeder(shardIdx: int; path: string; relayWriteFd: cint): int {.gcsafe
     discard posix.close(fileFd)
     discard posix.close(relayWriteFd)
     if shardIdx == 0:
-      gMergeFormat      = gfVcf
+      gMergeFormat      = ffVcf
       gMergeHeader.ready = true
     return 0
 
@@ -874,9 +839,9 @@ proc doFileFeeder(shardIdx: int; path: string; relayWriteFd: cint): int {.gcsafe
   while hEnd < 0:
     hEnd =
       case fmt
-      of gfBcf:  findBcfHeaderEnd(pending)
-      of gfVcf:  findVcfHeaderEnd(pending)
-      of gfText: 0
+      of ffBcf:  findBcfHeaderEnd(pending)
+      of ffVcf:  findVcfHeaderEnd(pending)
+      of ffText: 0
     if hEnd >= 0: break
     let n = posix.read(fileFd, cast[pointer](addr raw[0]), ReadSize)
     if n <= 0: break
@@ -935,7 +900,7 @@ proc gatherFilesMerge*(cfg: GatherConfig; inputPaths: seq[string]) =
 
   gMergeHeader.ready = false
   gMergeHeader.len   = 0
-  gMergeFormat      = gfVcf
+  gMergeFormat      = ffVcf
 
   var relayReadFds: seq[cint]
   var feederFvs:   seq[FlowVar[int]]

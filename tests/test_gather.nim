@@ -1,11 +1,11 @@
-## Tests for gather.nim — G1: types, inferGatherFormat, validateGatherConfig.
+## Tests for gather.nim — G1: types, inferFileFormat, validateGatherConfig.
 ##                         G2: isBgzfStream, sniffFormat, sniffStreamFormat.
 ## Run from project root: nim c -d:debug -r tests/test_gather.nim
 
 import std/[os, osproc, options, strformat, strutils]
 import std/posix
 import "../src/vcfparty/gather"
-import "../src/vcfparty/bgzf_utils"
+import "../src/vcfparty/vcf_utils"
 
 const DataDir  = "tests/data"
 const SmallVcf = DataDir / "small.vcf.gz"
@@ -20,15 +20,15 @@ const SmallBcf = DataDir / "small.bcf"
 if paramCount() >= 1:
   case paramStr(1)
   of "--exit-test-bad-override":
-    discard inferGatherFormat("output.vcf.gz", "bam")
+    discard inferFileFormat("output.vcf.gz", "bam")
   of "--exit-test-mutual-exclusion":
     let cfg = GatherConfig(headerPattern: some("#"), headerN: some(1))
     validateGatherConfig(cfg)
   of "--exit-test-vcf-header-flag":
-    let cfg = GatherConfig(format: gfVcf, headerPattern: some("#"))
+    let cfg = GatherConfig(format: ffVcf, headerPattern: some("#"))
     validateGatherConfig(cfg)
   of "--exit-test-bcf-header-flag":
-    let cfg = GatherConfig(format: gfBcf, headerN: some(1))
+    let cfg = GatherConfig(format: ffBcf, headerN: some(1))
     validateGatherConfig(cfg)
   else: discard
 
@@ -38,42 +38,42 @@ if paramCount() >= 1:
 
 block testInferAllExtensions:
   block:
-    let (f, c) = inferGatherFormat("out.vcf.gz", "")
-    doAssert f == gfVcf,          &".vcf.gz: expected gfVcf, got {f}"
-    doAssert c == gcBgzf,         &".vcf.gz: expected gcBgzf, got {c}"
+    let (f, c) = inferFileFormat("out.vcf.gz", "")
+    doAssert f == ffVcf,          &".vcf.gz: expected ffVcf, got {f}"
+    doAssert c == compBgzf,         &".vcf.gz: expected compBgzf, got {c}"
   block:
-    let (f, c) = inferGatherFormat("out.vcf.bgz", "")
-    doAssert f == gfVcf,          &".vcf.bgz: expected gfVcf, got {f}"
-    doAssert c == gcBgzf,         &".vcf.bgz: expected gcBgzf, got {c}"
+    let (f, c) = inferFileFormat("out.vcf.bgz", "")
+    doAssert f == ffVcf,          &".vcf.bgz: expected ffVcf, got {f}"
+    doAssert c == compBgzf,         &".vcf.bgz: expected compBgzf, got {c}"
   block:
-    let (f, c) = inferGatherFormat("out.bcf", "")
-    doAssert f == gfBcf,          &".bcf: expected gfBcf, got {f}"
-    doAssert c == gcBgzf,         &".bcf: expected gcBgzf, got {c}"
+    let (f, c) = inferFileFormat("out.bcf", "")
+    doAssert f == ffBcf,          &".bcf: expected ffBcf, got {f}"
+    doAssert c == compBgzf,         &".bcf: expected compBgzf, got {c}"
   block:
-    let (f, c) = inferGatherFormat("out.vcf", "")
-    doAssert f == gfVcf,          &".vcf: expected gfVcf, got {f}"
-    doAssert c == gcUncompressed, &".vcf: expected gcUncompressed, got {c}"
+    let (f, c) = inferFileFormat("out.vcf", "")
+    doAssert f == ffVcf,          &".vcf: expected ffVcf, got {f}"
+    doAssert c == compNone, &".vcf: expected compNone, got {c}"
   block:
-    let (f, c) = inferGatherFormat("out.txt.gz", "")
-    doAssert f == gfText,         &".txt.gz: expected gfText, got {f}"
-    doAssert c == gcBgzf,         &".txt.gz: expected gcBgzf, got {c}"
+    let (f, c) = inferFileFormat("out.txt.gz", "")
+    doAssert f == ffText,         &".txt.gz: expected ffText, got {f}"
+    doAssert c == compBgzf,         &".txt.gz: expected compBgzf, got {c}"
   block:
-    let (f, c) = inferGatherFormat("out.txt", "")
-    doAssert f == gfText,         &".txt: expected gfText, got {f}"
-    doAssert c == gcUncompressed, &".txt: expected gcUncompressed, got {c}"
+    let (f, c) = inferFileFormat("out.txt", "")
+    doAssert f == ffText,         &".txt: expected ffText, got {f}"
+    doAssert c == compNone, &".txt: expected compNone, got {c}"
   block:
-    let (f, c) = inferGatherFormat("out.out.gz", "")
-    doAssert f == gfText,         &"any.gz: expected gfText, got {f}"
-    doAssert c == gcBgzf,         &"any.gz: expected gcBgzf, got {c}"
+    let (f, c) = inferFileFormat("out.out.gz", "")
+    doAssert f == ffText,         &"any.gz: expected ffText, got {f}"
+    doAssert c == compBgzf,         &"any.gz: expected compBgzf, got {c}"
   block:
-    let (f, c) = inferGatherFormat("out.bgz", "")
-    doAssert f == gfText,         &".bgz: expected gfText, got {f}"
-    doAssert c == gcBgzf,         &".bgz: expected gcBgzf, got {c}"
+    let (f, c) = inferFileFormat("out.bgz", "")
+    doAssert f == ffText,         &".bgz: expected ffText, got {f}"
+    doAssert c == compBgzf,         &".bgz: expected compBgzf, got {c}"
   block:
-    let (f, c) = inferGatherFormat("out.xyz", "")
-    doAssert f == gfText,         &".xyz: expected gfText (unknown ext), got {f}"
-    doAssert c == gcUncompressed, &".xyz: expected gcUncompressed, got {c}"
-  echo "PASS inferGatherFormat: all extensions (including .vcf.bgz, .bgz, unknown)"
+    let (f, c) = inferFileFormat("out.xyz", "")
+    doAssert f == ffText,         &".xyz: expected ffText (unknown ext), got {f}"
+    doAssert c == compNone, &".xyz: expected compNone, got {c}"
+  echo "PASS inferFileFormat: all extensions (including .vcf.bgz, .bgz, unknown)"
 
 # ---------------------------------------------------------------------------
 # G1.2 — testInferWithOverride: fmtOverride overrides format, compression from extension
@@ -82,19 +82,19 @@ block testInferAllExtensions:
 block testInferWithOverride:
   # Override format; compression still from path extension.
   block:
-    let (f, c) = inferGatherFormat("out.vcf.gz", "bcf")
-    doAssert f == gfBcf and c == gcBgzf,
+    let (f, c) = inferFileFormat("out.vcf.gz", "bcf")
+    doAssert f == ffBcf and c == compBgzf,
       &".vcf.gz + --gather-fmt bcf: got ({f}, {c})"
   block:
-    let (f, c) = inferGatherFormat("out.vcf.gz", "txt")
-    doAssert f == gfText and c == gcBgzf,
+    let (f, c) = inferFileFormat("out.vcf.gz", "txt")
+    doAssert f == ffText and c == compBgzf,
       &".vcf.gz + --gather-fmt txt: got ({f}, {c})"
-  # Unknown extension with valid override → format from override, compression gcUncompressed.
+  # Unknown extension with valid override → format from override, compression compNone.
   block:
-    let (f, c) = inferGatherFormat("out.xyz", "vcf")
-    doAssert f == gfVcf and c == gcUncompressed,
+    let (f, c) = inferFileFormat("out.xyz", "vcf")
+    doAssert f == ffVcf and c == compNone,
       &".xyz + --gather-fmt vcf: got ({f}, {c})"
-  echo "PASS inferGatherFormat: fmtOverride overrides format, compression from extension"
+  echo "PASS inferFileFormat: fmtOverride overrides format, compression from extension"
 
 # ---------------------------------------------------------------------------
 # G1.3 — testValidateConfigOk: non-conflicting configs pass
@@ -102,8 +102,8 @@ block testInferWithOverride:
 
 block testValidateConfigOk:
   validateGatherConfig(GatherConfig())                                              # neither set
-  validateGatherConfig(GatherConfig(format: gfText, headerPattern: some("#")))     # text + pattern
-  validateGatherConfig(GatherConfig(format: gfText, headerN: some(3)))             # text + n
+  validateGatherConfig(GatherConfig(format: ffText, headerPattern: some("#")))     # text + pattern
+  validateGatherConfig(GatherConfig(format: ffText, headerN: some(3)))             # text + n
   echo "PASS validateGatherConfig: non-conflicting configs pass"
 
 # ---------------------------------------------------------------------------
@@ -126,7 +126,7 @@ block buildHelper:
 block testInferBadOverride:
   let (_, code) = execCmdEx(HelperBin & " --exit-test-bad-override 2>/dev/null")
   doAssert code != 0, "invalid fmtOverride should exit non-zero"
-  echo "PASS G1.4 inferGatherFormat: invalid fmtOverride exits 1"
+  echo "PASS G1.4 inferFileFormat: invalid fmtOverride exits 1"
 
 # ---------------------------------------------------------------------------
 # G1.5 — testMutualExclusion: --header-pattern + --header-n exits 1
@@ -185,26 +185,26 @@ block testIsBgzfStream:
 block testSniffFormat:
   # BCF magic: B C F \x02 \x02
   let bcfBytes = [byte('B'), byte('C'), byte('F'), 0x02'u8, 0x02'u8, 0x00'u8]
-  doAssert sniffFormat(bcfBytes) == gfBcf, "BCF magic → gfBcf"
+  doAssert sniffFormat(bcfBytes) == ffBcf, "BCF magic → ffBcf"
 
   # VCF: starts with ##fileformat
   var vcfBytes: seq[byte]
   for c in "##fileformatVCFv4.2\n":
     vcfBytes.add(byte(c))
-  doAssert sniffFormat(vcfBytes) == gfVcf, "##fileformat → gfVcf"
+  doAssert sniffFormat(vcfBytes) == ffVcf, "##fileformat → ffVcf"
 
   # Text: something else
   var txtBytes: seq[byte]
   for c in "CHROM\tPOS\tID\n":
     txtBytes.add(byte(c))
-  doAssert sniffFormat(txtBytes) == gfText, "other bytes → gfText"
+  doAssert sniffFormat(txtBytes) == ffText, "other bytes → ffText"
 
   # Too short to match either magic
-  doAssert sniffFormat([0x00'u8, 0x01'u8]) == gfText, "short buffer → gfText"
+  doAssert sniffFormat([0x00'u8, 0x01'u8]) == ffText, "short buffer → ffText"
 
   # Exactly BCF magic length
   let bcfExact = [byte('B'), byte('C'), byte('F'), 0x02'u8, 0x02'u8]
-  doAssert sniffFormat(bcfExact) == gfBcf, "exact BCF magic length → gfBcf"
+  doAssert sniffFormat(bcfExact) == ffBcf, "exact BCF magic length → ffBcf"
 
   echo "PASS sniffFormat"
 
@@ -224,7 +224,7 @@ block testSniffStreamFormatBcf:
   f.close()
   buf.setLen(n)
   let (fmt, isBgzf) = sniffStreamFormat(buf)
-  doAssert fmt == gfBcf,  &"small.bcf: expected gfBcf, got {fmt}"
+  doAssert fmt == ffBcf,  &"small.bcf: expected ffBcf, got {fmt}"
   doAssert isBgzf,         "small.bcf: expected BGZF stream"
   echo "PASS sniffStreamFormat: small.bcf detected as BCF/BGZF"
 
@@ -240,7 +240,7 @@ block testSniffStreamFormatVcf:
   f.close()
   buf.setLen(n)
   let (fmt, isBgzf) = sniffStreamFormat(buf)
-  doAssert fmt == gfVcf,  &"small.vcf.gz: expected gfVcf, got {fmt}"
+  doAssert fmt == ffVcf,  &"small.vcf.gz: expected ffVcf, got {fmt}"
   doAssert isBgzf,         "small.vcf.gz: expected BGZF stream"
   echo "PASS sniffStreamFormat: small.vcf.gz detected as VCF/BGZF"
 
@@ -254,7 +254,7 @@ block testSniffStreamFormatText:
   for c in "col1\tcol2\tcol3\nhello\tworld\t42\n":
     raw.add(byte(c))
   let (fmt, isBgzf) = sniffStreamFormat(raw)
-  doAssert fmt == gfText, &"plain text: expected gfText, got {fmt}"
+  doAssert fmt == ffText, &"plain text: expected ffText, got {fmt}"
   doAssert not isBgzf,    "plain text: should not be BGZF"
   echo "PASS sniffStreamFormat: plain text detected as text/uncompressed"
 
@@ -268,7 +268,7 @@ block testSniffStreamFormatUncompressedVcf:
   for c in "##fileformatVCFv4.2\n##source=vcfparty\n#CHROM\tPOS\n":
     raw.add(byte(c))
   let (fmt, isBgzf) = sniffStreamFormat(raw)
-  doAssert fmt == gfVcf,  &"uncompressed VCF: expected gfVcf, got {fmt}"
+  doAssert fmt == ffVcf,  &"uncompressed VCF: expected ffVcf, got {fmt}"
   doAssert not isBgzf,    "uncompressed VCF: should not be BGZF"
   echo "PASS sniffStreamFormat: uncompressed VCF detected as VCF/uncompressed"
 
@@ -283,7 +283,7 @@ block testSniffStreamFormatCompressedText:
     raw.add(byte(c))
   let compressed = compressToBgzf(raw)
   let (fmt, isBgzf) = sniffStreamFormat(compressed)
-  doAssert fmt == gfText, &"BGZF text: expected gfText, got {fmt}"
+  doAssert fmt == ffText, &"BGZF text: expected ffText, got {fmt}"
   doAssert isBgzf,         "BGZF text: expected BGZF stream"
   echo "PASS sniffStreamFormat: BGZF-compressed text detected as text/BGZF"
 
@@ -457,7 +457,7 @@ block testRunInterceptorBcfStrip:
   bcfData.add(records)
 
   # Set global state: uncompressed BCF detected by shard 0.
-  gDetectedFormat = gfBcf
+  gDetectedFormat = ffBcf
   gStreamIsBgzf   = false
   gChromLine.ready = true
 
@@ -467,7 +467,7 @@ block testRunInterceptorBcfStrip:
   discard posix.close(fds[1])
 
   const TmpBcf = "/tmp/vcfparty_test_g3_bcf.bin"
-  discard runInterceptor(GatherConfig(format: gfBcf, compression: gcUncompressed),
+  discard runInterceptor(GatherConfig(format: ffBcf, compression: compNone),
                  shardIdx = 1, fds[0], TmpBcf)
 
   let f = open(TmpBcf, fmRead)
@@ -490,7 +490,7 @@ block testRunInterceptorVcfStrip:
   for c in "##fileformat=VCFv4.2\n#CHROM\tPOS\n1\t100\n":
     vcfData.add(byte(c))
 
-  gDetectedFormat = gfVcf
+  gDetectedFormat = ffVcf
   gStreamIsBgzf   = false
   # Set gChromLine.buf to match the #CHROM line in vcfData above.
   let chromStr = "#CHROM\tPOS"
@@ -505,7 +505,7 @@ block testRunInterceptorVcfStrip:
   discard posix.close(fds[1])
 
   const TmpVcf = "/tmp/vcfparty_test_g3_vcf.txt"
-  let cfg = GatherConfig(format: gfVcf, compression: gcUncompressed)
+  let cfg = GatherConfig(format: ffVcf, compression: compNone)
   discard runInterceptor(cfg, shardIdx = 1, fds[0], TmpVcf)
 
   let f = open(TmpVcf, fmRead)
@@ -529,7 +529,7 @@ block testRunInterceptorHeaderN:
   var data: seq[byte]
   for c in "hdr1\nhdr2\ndata1\ndata2\n": data.add(byte(c))
 
-  gDetectedFormat = gfText
+  gDetectedFormat = ffText
   gStreamIsBgzf   = false
   gChromLine.ready = true
 
@@ -539,7 +539,7 @@ block testRunInterceptorHeaderN:
   discard posix.close(fds[1])
 
   const TmpN = "/tmp/vcfparty_test_g3_headern.txt"
-  let cfg = GatherConfig(format: gfText, compression: gcUncompressed, headerN: some(2))
+  let cfg = GatherConfig(format: ffText, compression: compNone, headerN: some(2))
   discard runInterceptor(cfg, shardIdx = 1, fds[0], TmpN)
 
   let f = open(TmpN, fmRead)
@@ -564,7 +564,7 @@ block testRunInterceptorNoStrip:
   var data: seq[byte]
   for c in "##header\nrecord1\nrecord2\n": data.add(byte(c))
 
-  gDetectedFormat = gfText
+  gDetectedFormat = ffText
   gStreamIsBgzf   = false
   gChromLine.ready = true
 
@@ -574,7 +574,7 @@ block testRunInterceptorNoStrip:
   discard posix.close(fds[1])
 
   const TmpPass = "/tmp/vcfparty_test_g3_nostrip.txt"
-  let cfg = GatherConfig(format: gfText, compression: gcUncompressed)
+  let cfg = GatherConfig(format: ffText, compression: compNone)
   discard runInterceptor(cfg, shardIdx = 1, fds[0], TmpPass)
 
   let f = open(TmpPass, fmRead)
@@ -601,7 +601,7 @@ block testRecompressUncompressedToBgzf:
   discard posix.close(fds[1])
 
   const TmpRecomp = "/tmp/vcfparty_test_g4_recomp.bgzf"
-  discard runInterceptor(GatherConfig(format: gfText, compression: gcBgzf),
+  discard runInterceptor(GatherConfig(format: ffText, compression: compBgzf),
                  shardIdx = 0, fds[0], TmpRecomp)
 
   let f = open(TmpRecomp, fmRead)
@@ -631,7 +631,7 @@ block testDecompressBgzfToUncompressed:
   discard posix.close(fds[1])
 
   const TmpDecomp = "/tmp/vcfparty_test_g4_decomp.txt"
-  discard runInterceptor(GatherConfig(format: gfText, compression: gcUncompressed),
+  discard runInterceptor(GatherConfig(format: ffText, compression: compNone),
                  shardIdx = 0, fds[0], TmpDecomp)
 
   let f = open(TmpDecomp, fmRead)
@@ -660,7 +660,7 @@ block testPassThroughBgzfToBgzf:
   discard posix.close(fds[1])
 
   const TmpPassBgzf = "/tmp/vcfparty_test_g4_passbgzf.bgzf"
-  discard runInterceptor(GatherConfig(format: gfText, compression: gcBgzf),
+  discard runInterceptor(GatherConfig(format: ffText, compression: compBgzf),
                  shardIdx = 0, fds[0], TmpPassBgzf)
 
   let f = open(TmpPassBgzf, fmRead)
@@ -682,7 +682,7 @@ block testShardStripAndRecompress:
   var vcfData: seq[byte]
   for c in "##fileformat=VCFv4.2\n#CHROM\tPOS\n1\t100\n": vcfData.add(byte(c))
 
-  gDetectedFormat = gfVcf
+  gDetectedFormat = ffVcf
   gStreamIsBgzf   = false
   let chromStr4 = "#CHROM\tPOS"
   gChromLine.len = chromStr4.len.int32
@@ -696,7 +696,7 @@ block testShardStripAndRecompress:
   discard posix.close(fds[1])
 
   const TmpShard = "/tmp/vcfparty_test_g4_shard.bgzf"
-  discard runInterceptor(GatherConfig(format: gfVcf, compression: gcBgzf),
+  discard runInterceptor(GatherConfig(format: ffVcf, compression: compBgzf),
                  shardIdx = 1, fds[0], TmpShard)
 
   let f = open(TmpShard, fmRead)
@@ -722,7 +722,7 @@ block testShardBgzfInputStripAndRecompress:
   for c in "##fileformat=VCFv4.2\n#CHROM\tPOS\n1\t200\n": raw.add(byte(c))
   let compressed = compressToBgzfMulti(raw)
 
-  gDetectedFormat = gfVcf
+  gDetectedFormat = ffVcf
   gStreamIsBgzf   = true
   let chromStr5 = "#CHROM\tPOS"
   gChromLine.len = chromStr5.len.int32
@@ -736,7 +736,7 @@ block testShardBgzfInputStripAndRecompress:
   discard posix.close(fds[1])
 
   const TmpBgzfShard = "/tmp/vcfparty_test_g4_bgzf_shard.bgzf"
-  discard runInterceptor(GatherConfig(format: gfVcf, compression: gcBgzf),
+  discard runInterceptor(GatherConfig(format: ffVcf, compression: compBgzf),
                  shardIdx = 1, fds[0], TmpBgzfShard)
 
   let f = open(TmpBgzfShard, fmRead)
@@ -803,7 +803,7 @@ block testConcatShardsUncompressed:
   writeFile(shard1, "line1\nline2\n")
   writeFile(shard2, "line3\nline4\n")
 
-  let cfg = GatherConfig(format: gfText, compression: gcUncompressed,
+  let cfg = GatherConfig(format: ffText, compression: compNone,
                          outputPath: OutPath, tmpDir: TmpDir)
   concatenateShards(cfg, @[shard1, shard2])
 
@@ -842,7 +842,7 @@ block testConcatShardsBgzf:
     discard f.writeBytes(blk2, 0, blk2.len)
     f.close()
 
-  let cfg = GatherConfig(format: gfVcf, compression: gcBgzf,
+  let cfg = GatherConfig(format: ffVcf, compression: compBgzf,
                          outputPath: OutPath, tmpDir: TmpDir)
   concatenateShards(cfg, @[shard1, shard2])
 
@@ -1364,7 +1364,7 @@ block testChromLineFromBytesVcf:
   discard readBytes(f, allBytes, 0, fileSize)
   f.close()
   let (fmt, isBgzf) = sniffStreamFormat(allBytes)
-  doAssert fmt == gfVcf, &"S2.3: expected gfVcf, got {fmt}"
+  doAssert fmt == ffVcf, &"S2.3: expected ffVcf, got {fmt}"
   let line = chromLineFromBytes(allBytes, fmt, isBgzf)
   doAssert line.startsWith("#CHROM"), &"S2.3: expected '#CHROM...' got '{line}'"
   echo "PASS S2.3 chromLineFromBytes: found #CHROM in BGZF VCF"
@@ -1381,7 +1381,7 @@ block testChromLineFromBytesBcf:
   discard readBytes(f, allBytes, 0, fileSize)
   f.close()
   let (fmt, isBgzf) = sniffStreamFormat(allBytes)
-  doAssert fmt == gfBcf, &"S2.4: expected gfBcf, got {fmt}"
+  doAssert fmt == ffBcf, &"S2.4: expected ffBcf, got {fmt}"
   let line = chromLineFromBytes(allBytes, fmt, isBgzf)
   doAssert line.startsWith("#CHROM"), &"S2.4: expected '#CHROM...' got '{line}'"
   echo "PASS S2.4 chromLineFromBytes: found #CHROM in BGZF BCF"
@@ -1673,19 +1673,19 @@ block testExtractSortKeyVcf:
     result = newSeq[byte](line.len)
     for i in 0 ..< line.len: result[i] = byte(line[i])
 
-  let (rank1, pos1) = extractSortKey(vcfRec("chr1", 100), gfVcf, contigs)
+  let (rank1, pos1) = extractSortKey(vcfRec("chr1", 100), ffVcf, contigs)
   doAssert rank1 == 0, &"M3 VCF chr1 rank: {rank1}"
   doAssert pos1 == 99'i32, &"M3 VCF chr1 pos: {pos1} (VCF 100 → 0-based 99)"
 
-  let (rank2, pos2) = extractSortKey(vcfRec("chr2", 1), gfVcf, contigs)
+  let (rank2, pos2) = extractSortKey(vcfRec("chr2", 1), ffVcf, contigs)
   doAssert rank2 == 1, &"M3 VCF chr2 rank: {rank2}"
   doAssert pos2 == 0'i32, &"M3 VCF chr2 pos: {pos2}"
 
-  let (rank3, pos3) = extractSortKey(vcfRec("chr3", 500), gfVcf, contigs)
+  let (rank3, pos3) = extractSortKey(vcfRec("chr3", 500), ffVcf, contigs)
   doAssert rank3 == 2, &"M3 VCF chr3 rank: {rank3}"
   doAssert pos3 == 499'i32, &"M3 VCF chr3 pos: {pos3}"
 
-  let (rankU, _) = extractSortKey(vcfRec("chrX", 1), gfVcf, contigs)
+  let (rankU, _) = extractSortKey(vcfRec("chrX", 1), ffVcf, contigs)
   doAssert rankU == high(int), &"M3 VCF unknown contig rank: {rankU}"
 
   echo "PASS M3.1 extractSortKey VCF: rank and 0-based pos correct"
@@ -1707,15 +1707,15 @@ block testExtractSortKeyBcf:
     result[14] = byte((pos shr 16) and 0xff)
     result[15] = byte((pos shr 24) and 0xff)
 
-  let (rank0, pos0) = extractSortKey(bcfRec(0'i32, 0'i32), gfBcf, contigs)
+  let (rank0, pos0) = extractSortKey(bcfRec(0'i32, 0'i32), ffBcf, contigs)
   doAssert rank0 == 0, &"M3 BCF chromId=0 rank: {rank0}"
   doAssert pos0 == 0'i32, &"M3 BCF chromId=0 pos: {pos0}"
 
-  let (rank2, pos2) = extractSortKey(bcfRec(2'i32, 999'i32), gfBcf, contigs)
+  let (rank2, pos2) = extractSortKey(bcfRec(2'i32, 999'i32), ffBcf, contigs)
   doAssert rank2 == 2, &"M3 BCF chromId=2 rank: {rank2}"
   doAssert pos2 == 999'i32, &"M3 BCF chromId=2 pos: {pos2}"
 
-  let (rankU, _) = extractSortKey(bcfRec(99'i32, 0'i32), gfBcf, contigs)
+  let (rankU, _) = extractSortKey(bcfRec(99'i32, 0'i32), ffBcf, contigs)
   doAssert rankU == high(int), &"M3 BCF out-of-range chromId rank: {rankU}"
 
   echo "PASS M3.2 extractSortKey BCF: rank and pos from correct offsets"
@@ -1733,7 +1733,7 @@ block testExtractSortKeyRealVcf:
   for i in 0 ..< firstLine.len: rec[i] = byte(firstLine[i])
   rec[firstLine.len] = byte('\n')
   let contigs = @["chr1", "chr2", "chr3"]
-  let (rank, pos) = extractSortKey(rec, gfVcf, contigs)
+  let (rank, pos) = extractSortKey(rec, ffVcf, contigs)
   var expectedRank = high(int)
   for ci in 0 ..< contigs.len:
     if contigs[ci] == chrom: expectedRank = ci; break
@@ -1774,7 +1774,7 @@ block testKWayMergeVcfTwoStreams:
   let tmpOut = getTempDir() / "vcfparty_m4_1.vcf"
   let outFd = posix.open(tmpOut.cstring, O_WRONLY or O_CREAT or O_TRUNC, Mode(0o644))
   doAssert outFd >= 0, "M4.1: failed to open output file"
-  kWayMerge(@[rfd1, rfd2], outFd, gfVcf, contigs)
+  kWayMerge(@[rfd1, rfd2], outFd, ffVcf, contigs)
   discard posix.close(outFd)
   discard posix.close(rfd1)
   discard posix.close(rfd2)
@@ -1810,7 +1810,7 @@ block testKWayMergeSingleStream:
   let tmpOut = getTempDir() / "vcfparty_m4_2.vcf"
   let outFd = posix.open(tmpOut.cstring, O_WRONLY or O_CREAT or O_TRUNC, Mode(0o644))
   doAssert outFd >= 0, "M4.2: failed to open output file"
-  kWayMerge(@[rfd], outFd, gfVcf, contigs)
+  kWayMerge(@[rfd], outFd, ffVcf, contigs)
   discard posix.close(outFd)
   discard posix.close(rfd)
 
@@ -1854,7 +1854,7 @@ block testKWayMergeBcfTwoStreams:
   let tmpOut = getTempDir() / "vcfparty_m4_3.bcf"
   let outFd = posix.open(tmpOut.cstring, O_WRONLY or O_CREAT or O_TRUNC, Mode(0o644))
   doAssert outFd >= 0, "M4.3: failed to open output file"
-  kWayMerge(@[rfd1, rfd2], outFd, gfBcf, contigs)
+  kWayMerge(@[rfd1, rfd2], outFd, ffBcf, contigs)
   discard posix.close(outFd)
   discard posix.close(rfd1)
   discard posix.close(rfd2)
