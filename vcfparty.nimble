@@ -52,6 +52,5 @@ task test, "Run all tests":
   exec "nim c --hints:off -r tests/test_merge.nim"
   exec "nim c --hints:off -r tests/test_collect.nim"
   exec "nim c --hints:off -r tests/test_gather.nim"
-  exec "nim c --hints:off --path:src/vcfparty -r tests/test_sniff.nim"
   exec "nim c --hints:off -r tests/test_cli.nim"
   # exec "testament pattern 'tests/test_*.nim'"

@@ -26,13 +26,13 @@ block buildBinary:
       echo "nimble build failed:\n", outp
       quit(1)
   doAssert fileExists(BinPath), "binary not found: " & BinPath
-  echo "PASS binary available"
+  echo "PASS CO0 binary available"
 
 let origVcf = countRecords(SmallVcf)
 let origBcf = countRecords(SmallBcf)
 
 # ---------------------------------------------------------------------------
-# C1 — single shard VCF collect → file
+# CO1 — single shard VCF collect → file
 # ---------------------------------------------------------------------------
 block testCollect1Shard:
   let tmpDir  = getTempDir() / "vcfparty_c1_1shard"
@@ -45,10 +45,10 @@ block testCollect1Shard:
   doAssert vc == 0, "C1: bcftools rejected collect output"
   doAssert countRecords(outFile) == origVcf, "C1: record count mismatch"
   removeDir(tmpDir)
-  echo &"PASS C1 collect: 1 shard VCF, {origVcf} records"
+  echo &"PASS CO1 collect: 1 shard VCF, {origVcf} records"
 
 # ---------------------------------------------------------------------------
-# C2 — 4 shards VCF collect → file (order-insensitive)
+# CO2 — 4 shards VCF collect → file (order-insensitive)
 # ---------------------------------------------------------------------------
 block testCollect4Shards:
   let tmpDir  = getTempDir() / "vcfparty_c2_4shards"
@@ -61,10 +61,10 @@ block testCollect4Shards:
   doAssert vc == 0, "C2: bcftools rejected collect output"
   doAssert countRecords(outFile) == origVcf, "C2: record count mismatch"
   removeDir(tmpDir)
-  echo &"PASS C2 collect: 4 shards VCF, {origVcf} records (order-insensitive)"
+  echo &"PASS CO2 collect: 4 shards VCF, {origVcf} records (order-insensitive)"
 
 # ---------------------------------------------------------------------------
-# C3 — BCF collect → file
+# CO3 — BCF collect → file
 # ---------------------------------------------------------------------------
 block testCollectBcf:
   let tmpDir  = getTempDir() / "vcfparty_c3_bcf"
@@ -78,10 +78,10 @@ block testCollectBcf:
   doAssert vc == 0, "C3: bcftools rejected BCF collect output"
   doAssert countRecords(outFile) == origBcf, "C3: BCF record count mismatch"
   removeDir(tmpDir)
-  echo &"PASS C3 collect: 4 shards BCF, {origBcf} records"
+  echo &"PASS CO3 collect: 4 shards BCF, {origBcf} records"
 
 # ---------------------------------------------------------------------------
-# C4 — VCF collect → stdout
+# CO4 — VCF collect → stdout
 # ---------------------------------------------------------------------------
 block testCollectStdout:
   let (outp, code) = execCmdEx(
@@ -90,10 +90,10 @@ block testCollectStdout:
   doAssert code == 0, &"C4 exited {code}"
   let n = outp.strip.parseInt
   doAssert n == origVcf, &"C4: stdout got {n} records, expected {origVcf}"
-  echo &"PASS C4 collect: stdout, {n} records"
+  echo &"PASS CO4 collect: stdout, {n} records"
 
 # ---------------------------------------------------------------------------
-# C5 — no partial records: uncompressed VCF pipeline, bcftools validates output
+# CO5 — no partial records: uncompressed VCF pipeline, bcftools validates output
 # ---------------------------------------------------------------------------
 block testCollectNoPartialRecords:
   let tmpDir  = getTempDir() / "vcfparty_c5_nopartial"
@@ -108,7 +108,5 @@ block testCollectNoPartialRecords:
   doAssert vc == 0, "C5: bcftools failed — likely partial record in output"
   doAssert countRecords(outFile) == origVcf, "C5: record count mismatch"
   removeDir(tmpDir)
-  echo &"PASS C5 collect: no partial records (bcftools validates uncompressed VCF)"
+  echo &"PASS CO5 collect: no partial records (bcftools validates uncompressed VCF)"
 
-echo ""
-echo "All collect C1–C5 tests passed."

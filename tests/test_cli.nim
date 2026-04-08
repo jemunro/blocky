@@ -39,14 +39,14 @@ block buildBinary:
       echo "nimble build failed:\n", outp
       quit(1)
   doAssert fileExists(BinPath), "binary not found: " & BinPath & " (run nimble build)"
-  echo "PASS binary available"
+  echo "PASS CL0 binary available"
 
 # ===========================================================================
-# C1–C7 — Error cases (missing flags, invalid args, unsupported modes)
+# CL1–CL7 — Error cases (missing flags, invalid args, unsupported modes)
 # ===========================================================================
 
 # ---------------------------------------------------------------------------
-# C1 — testMissingN: missing -n exits non-zero with 'n' in error message
+# CL1 — testMissingN: missing -n exits non-zero with 'n' in error message
 # ---------------------------------------------------------------------------
 
 block testMissingN:
@@ -54,19 +54,19 @@ block testMissingN:
   doAssert code != 0, "missing -n should exit non-zero"
   doAssert "n" in outp.toLowerAscii,
     &"missing -n error should mention 'n', got: {outp}"
-  echo "PASS missing -n exits non-zero"
+  echo "PASS CL1 missing -n exits non-zero"
 
 # ---------------------------------------------------------------------------
-# C2 — testInvalidN0: -n 0 exits non-zero
+# CL2 — testInvalidN0: -n 0 exits non-zero
 # ---------------------------------------------------------------------------
 
 block testInvalidN0:
   let (_, code) = run(&"scatter -n 0 -o /tmp/vcfparty_cli_test {SmallVcf}")
   doAssert code != 0, "-n 0 should exit non-zero"
-  echo "PASS -n 0 exits non-zero"
+  echo "PASS CL2 -n 0 exits non-zero"
 
 # ---------------------------------------------------------------------------
-# C3 — testMissingO: missing -o exits non-zero with 'o' in error message
+# CL3 — testMissingO: missing -o exits non-zero with 'o' in error message
 # ---------------------------------------------------------------------------
 
 block testMissingO:
@@ -74,10 +74,10 @@ block testMissingO:
   doAssert code != 0, "missing -o should exit non-zero"
   doAssert "o" in outp.toLowerAscii,
     &"missing -o error should mention 'o', got: {outp}"
-  echo "PASS missing -o exits non-zero"
+  echo "PASS CL3 missing -o exits non-zero"
 
 # ---------------------------------------------------------------------------
-# C4 — testUnknownExtension: unknown extension (.xyz) exits 1 with extension in message
+# CL4 — testUnknownExtension: unknown extension (.xyz) exits 1 with extension in message
 # ---------------------------------------------------------------------------
 
 block testUnknownExtension:
@@ -89,10 +89,10 @@ block testUnknownExtension:
   doAssert code != 0, "unknown extension should exit non-zero"
   doAssert ".xyz" in outp, &"error message should contain '.xyz', got: {outp}"
   removeDir(tmpDir)
-  echo "PASS unknown extension exits 1 with extension in message"
+  echo "PASS CL4 unknown extension exits 1 with extension in message"
 
 # ---------------------------------------------------------------------------
-# C5 — testBcfNoIndex: BCF without index exits 1 (no auto-scan fallback)
+# CL5 — testBcfNoIndex: BCF without index exits 1 (no auto-scan fallback)
 # ---------------------------------------------------------------------------
 
 block testBcfNoIndex:
@@ -105,10 +105,10 @@ block testBcfNoIndex:
   let (outp, code) = run(&"scatter -n 2 -o {tmpDir}/shard {tmpBcf}")
   doAssert code != 0, &"BCF with no index should exit non-zero, got {code}:\n{outp}"
   removeDir(tmpDir)
-  echo "PASS BCF no index exits 1"
+  echo "PASS CL5 BCF no index exits 1"
 
 # ---------------------------------------------------------------------------
-# C6 — testBcfRunForceScan: --force-scan with BCF via run exits 1
+# CL6 — testBcfRunForceScan: --force-scan with BCF via run exits 1
 # ---------------------------------------------------------------------------
 
 block testBcfRunForceScan:
@@ -120,10 +120,10 @@ block testBcfRunForceScan:
   doAssert "force-scan" in outp.toLowerAscii,
     &"error should mention force-scan, got: {outp}"
   removeDir(tmpDir)
-  echo "PASS BCF run --force-scan exits 1"
+  echo "PASS CL6 BCF run --force-scan exits 1"
 
 # ---------------------------------------------------------------------------
-# C7 — testBcfForceScan: --force-scan with BCF via scatter exits 1
+# CL7 — testBcfForceScan: --force-scan with BCF via scatter exits 1
 # ---------------------------------------------------------------------------
 
 block testBcfForceScan:
@@ -135,14 +135,14 @@ block testBcfForceScan:
   doAssert "force-scan" in outp.toLowerAscii,
     &"error should mention force-scan, got: {outp}"
   removeDir(tmpDir)
-  echo "PASS BCF --force-scan exits 1"
+  echo "PASS CL7 BCF --force-scan exits 1"
 
 # ===========================================================================
-# C8–C13 — Integration: scatter correctness for VCF and BCF
+# CL8–CL13 — Integration: scatter correctness for VCF and BCF
 # ===========================================================================
 
 # ---------------------------------------------------------------------------
-# C8 — testMissingIndex: no index file → auto-scan fallback with warning; shards produced
+# CL8 — testMissingIndex: no index file → auto-scan fallback with warning; shards produced
 # ---------------------------------------------------------------------------
 
 block testMissingIndex:
@@ -159,10 +159,10 @@ block testMissingIndex:
   doAssert fileExists(tmpDir / "shard_1.out.vcf.gz"), "shard 1 missing after no-index scatter"
   doAssert fileExists(tmpDir / "shard_2.out.vcf.gz"), "shard 2 missing after no-index scatter"
   removeDir(tmpDir)
-  echo "PASS no-index scatter: auto-scan with warning, shards produced"
+  echo "PASS CL8 no-index scatter: auto-scan with warning, shards produced"
 
 # ---------------------------------------------------------------------------
-# C9 — testForceScanFlag: --force-scan ignores existing index; shards valid, record count matches
+# CL9 — testForceScanFlag: --force-scan ignores existing index; shards valid, record count matches
 # ---------------------------------------------------------------------------
 
 block testForceScanFlag:
@@ -183,11 +183,11 @@ block testForceScanFlag:
     total += countAndCheckFS(p)
   doAssert total == countAndCheckFS(SmallVcf),
     &"--force-scan record count mismatch: shards={total}"
-  echo &"PASS --force-scan: 4 shards, {total} records"
+  echo &"PASS CL9 --force-scan: 4 shards, {total} records"
   removeDir(tmpDir)
 
 # ---------------------------------------------------------------------------
-# C10 — testEndToEnd: scatter -n 4 VCF; all shards valid, content hash matches
+# CL10 — testEndToEnd: scatter -n 4 VCF; all shards valid, content hash matches
 # ---------------------------------------------------------------------------
 
 block testEndToEnd:
@@ -197,7 +197,7 @@ block testEndToEnd:
 
   let (runOutp, runCode) = run(&"scatter -n 4 -o {outp_template} {SmallVcf}")
   doAssert runCode == 0, &"vcfparty scatter exited non-zero:\n{runOutp}"
-  echo "PASS e2e: vcfparty scatter -n 4 exited 0"
+  echo "PASS CL10.1 e2e: vcfparty scatter -n 4 exited 0"
 
   for i in 1..4:
     let shardPath = tmpDir / ("shard_" & $i & ".out.vcf.gz")
@@ -206,7 +206,7 @@ block testEndToEnd:
       "bcftools view -HG " & shardPath & " > /dev/null 2>&1")
     doAssert bcfCode == 0,
       &"bcftools rejected shard {i}: {bcfOutp}"
-  echo "PASS e2e: all 4 shards are valid VCFs (bcftools view)"
+  echo "PASS CL10.2 e2e: all 4 shards are valid VCFs (bcftools view)"
 
   var shardPaths: seq[string]
   for i in 1..4:
@@ -214,12 +214,12 @@ block testEndToEnd:
 
   doAssert recordsHash(shardPaths) == recordsHash(@[SmallVcf]),
     "e2e content hash mismatch: record corruption or reordering detected"
-  echo "PASS e2e: record content hash matches original (no corruption, correct count)"
+  echo "PASS CL10.3 e2e: record content hash matches original (no corruption, correct count)"
 
   removeDir(tmpDir)
 
 # ---------------------------------------------------------------------------
-# C11 — testCsiIndex: CSI-indexed VCF scatter; shards valid, record count matches
+# CL11 — testCsiIndex: CSI-indexed VCF scatter; shards valid, record count matches
 # ---------------------------------------------------------------------------
 
 block testCsiIndex:
@@ -245,12 +245,12 @@ block testCsiIndex:
   let origTotal = countRec(CsiVcf)
   doAssert shardTotal == origTotal,
     &"CSI record count mismatch: shards={shardTotal} orig={origTotal}"
-  echo &"PASS CSI: scatter -n 4, all shards valid, {origTotal} records"
+  echo &"PASS CL11 CSI: scatter -n 4, all shards valid, {origTotal} records"
 
   removeDir(tmpDir)
 
 # ---------------------------------------------------------------------------
-# C12 — testBcfExtension: BCF scatter produces .bcf shards with matching content hash
+# CL12 — testBcfExtension: BCF scatter produces .bcf shards with matching content hash
 # ---------------------------------------------------------------------------
 
 block testBcfExtension:
@@ -270,15 +270,15 @@ block testBcfExtension:
   doAssert recordsHash(bcfShardPaths) == recordsHash(@[SmallBcf]),
     "BCF content hash mismatch: record corruption or reordering detected"
   removeDir(tmpDir)
-  echo "PASS BCF .bcf extension → BCF mode, shards have .bcf extension, content hash matches"
+  echo "PASS CL12 BCF .bcf extension → BCF mode, shards have .bcf extension, content hash matches"
 
 # ---------------------------------------------------------------------------
-# C13 — testKg1000Genomes: large 1KG VCF scatter -n 10 (skipped if fixture absent)
+# CL13 — testKg1000Genomes: large 1KG VCF scatter -n 10 (skipped if fixture absent)
 # ---------------------------------------------------------------------------
 
 block testKg1000Genomes:
   if not fileExists(KgVcf):
-    echo "SKIP 1KG chr22: file not present (run tests/generate_fixtures.sh)"
+    echo "SKIP CL13 1KG chr22: file not present (run tests/generate_fixtures.sh)"
   else:
     let tmpDir = getTempDir() / "vcfparty_kg_test"
     createDir(tmpDir)
@@ -286,7 +286,7 @@ block testKg1000Genomes:
 
     let (runOutp, runCode) = run(&"scatter -n 10 -o {outp_template} {KgVcf}")
     doAssert runCode == 0, &"vcfparty scatter (1KG) exited non-zero:\n{runOutp}"
-    echo "PASS 1KG: vcfparty scatter -n 10 exited 0"
+    echo "PASS CL13.1 1KG: vcfparty scatter -n 10 exited 0"
 
     # With -n 10, nDigits=2 so names are shard_01.out.vcf.gz … shard_10.out.vcf.gz
     for i in 1..10:
@@ -295,7 +295,7 @@ block testKg1000Genomes:
       let (bcfOutp, bcfCode) = execCmdEx(
         "bcftools view -HG " & path & " > /dev/null 2>&1")
       doAssert bcfCode == 0, &"bcftools rejected 1KG shard {i}: {bcfOutp}"
-    echo "PASS 1KG: all 10 shards valid VCFs (bcftools view)"
+    echo "PASS CL13.2 1KG: all 10 shards valid VCFs (bcftools view)"
 
     proc countRecs(path: string): int =
       let (o, _) = execCmdEx("bcftools view -HG " & path & " 2>/dev/null | wc -l")
@@ -307,19 +307,16 @@ block testKg1000Genomes:
     let origTotal = countRecs(KgVcf)
     doAssert shardTotal == origTotal,
       &"1KG record count mismatch: shards={shardTotal} orig={origTotal}"
-    echo &"PASS 1KG: record count matches original ({origTotal} records across 10 shards)"
+    echo &"PASS CL13.3 1KG: record count matches original ({origTotal} records across 10 shards)"
 
     removeDir(tmpDir)
 
-echo ""
-echo "All CLI tests passed."
-
 # ===========================================================================
-# C14–C17 — -i/--interleave and -s/--sequential flags
+# CL14–CL17 — -i/--interleave and -s/--sequential flags
 # ===========================================================================
 
 # ---------------------------------------------------------------------------
-# C14 — scatter -s: accepted as no-op, correct output
+# CL14 — scatter -s: accepted as no-op, correct output
 # ---------------------------------------------------------------------------
 
 block testScatterSequentialFlag:
@@ -330,10 +327,10 @@ block testScatterSequentialFlag:
   doAssert fileExists(tmpDir / "shard_1.shard.vcf.gz"), "C14: shard 1 missing"
   doAssert fileExists(tmpDir / "shard_2.shard.vcf.gz"), "C14: shard 2 missing"
   removeDir(tmpDir)
-  echo "PASS C14 scatter -s: accepted, shards produced"
+  echo "PASS CL14 scatter -s: accepted, shards produced"
 
 # ---------------------------------------------------------------------------
-# C15 — scatter -i: warning emitted, sequential fallback, correct output
+# CL15 — scatter -i: warning emitted, sequential fallback, correct output
 # ---------------------------------------------------------------------------
 
 block testScatterInterleaveFlag:
@@ -346,10 +343,10 @@ block testScatterInterleaveFlag:
   doAssert fileExists(tmpDir / "shard_1.shard.vcf.gz"), "C15: shard 1 missing"
   doAssert fileExists(tmpDir / "shard_2.shard.vcf.gz"), "C15: shard 2 missing"
   removeDir(tmpDir)
-  echo "PASS C15 scatter -i: warning emitted, sequential fallback, shards produced"
+  echo "PASS CL15 scatter -i: warning emitted, sequential fallback, shards produced"
 
 # ---------------------------------------------------------------------------
-# C16 — run -s: accepted as no-op, correct output
+# CL16 — run -s: accepted as no-op, correct output
 # ---------------------------------------------------------------------------
 
 block testRunSequentialFlag:
@@ -363,10 +360,10 @@ block testRunSequentialFlag:
   let (cntOut, _) = execCmdEx("bcftools view -HG " & outFile & " 2>/dev/null | wc -l")
   doAssert cntOut.strip.parseInt > 0, "C16: output has no records"
   removeDir(tmpDir)
-  echo "PASS C16 run -s: accepted, output produced"
+  echo "PASS CL16 run -s: accepted, output produced"
 
 # ---------------------------------------------------------------------------
-# C17 — run -i: warning emitted, sequential fallback, correct output
+# CL17 — run -i: warning emitted, sequential fallback, correct output
 # ---------------------------------------------------------------------------
 
 block testRunInterleaveFlag:
@@ -382,13 +379,10 @@ block testRunInterleaveFlag:
   let (cntOut, _) = execCmdEx("bcftools view -HG " & outFile & " 2>/dev/null | wc -l")
   doAssert cntOut.strip.parseInt > 0, "C17: output has no records"
   removeDir(tmpDir)
-  echo "PASS C17 run -i: warning emitted, sequential fallback, output produced"
-
-echo ""
-echo "All C14-C17 -i/-s flag tests passed."
+  echo "PASS CL17 run -i: warning emitted, sequential fallback, output produced"
 
 # ===========================================================================
-# C18–C21 — -O output format flag
+# CL18–CL21 — -O output format flag
 # ===========================================================================
 
 proc isBgzf(path: string): bool =
@@ -399,7 +393,7 @@ proc isBgzf(path: string): bool =
   b[0] == 0x1f'u8 and b[1] == 0x8b'u8
 
 # ---------------------------------------------------------------------------
-# C18 — run -Oz: BGZF output, records intact
+# CL18 — run -Oz: BGZF output, records intact
 # ---------------------------------------------------------------------------
 
 block testRunOutputFmtBgzf:
@@ -412,10 +406,10 @@ block testRunOutputFmtBgzf:
   let (cnt, _) = execCmdEx("bcftools view -HG " & outFile & " 2>/dev/null | wc -l")
   doAssert cnt.strip.parseInt > 0, "C18: output has no records"
   removeDir(tmpDir)
-  echo "PASS C18 run -Oz: VCF BGZF output, records intact"
+  echo "PASS CL18 run -Oz: VCF BGZF output, records intact"
 
 # ---------------------------------------------------------------------------
-# C19 — run -Ov: VCF uncompressed output
+# CL19 — run -Ov: VCF uncompressed output
 # ---------------------------------------------------------------------------
 
 block testRunOutputFmtVcfUncomp:
@@ -429,10 +423,10 @@ block testRunOutputFmtVcfUncomp:
   let (cnt, _) = execCmdEx("grep -c '^[^#]' " & outFile & " 2>/dev/null || true")
   doAssert cnt.strip.parseInt > 0, "C19: output has no records"
   removeDir(tmpDir)
-  echo "PASS C19 run -Ov: VCF uncompressed output"
+  echo "PASS CL19 run -Ov: VCF uncompressed output"
 
 # ---------------------------------------------------------------------------
-# C20 — run -Ob with VCF input: exits non-zero (sniff mismatch: BCF flag, VCF input)
+# CL20 — run -Ob with VCF input: exits non-zero (sniff mismatch: BCF flag, VCF input)
 # ---------------------------------------------------------------------------
 
 block testRunOutputFmtBcfMismatch:
@@ -445,10 +439,10 @@ block testRunOutputFmtBcfMismatch:
   doAssert "pipeline" in outp or "format conversion" in outp or "VCF" in outp or "BCF" in outp,
     &"C20: expected format mismatch error, got:\n{outp}"
   removeDir(tmpDir)
-  echo "PASS C20 run -Ob VCF input: exits non-zero (format sniff mismatch)"
+  echo "PASS CL20 run -Ob VCF input: exits non-zero (format sniff mismatch)"
 
 # ---------------------------------------------------------------------------
-# C21 — run -Ov with VCF input: exits 0 and produces uncompressed VCF output
+# CL21 — run -Ov with VCF input: exits 0 and produces uncompressed VCF output
 # ---------------------------------------------------------------------------
 
 block testRunOutputFmtVcfUncompressed:
@@ -462,17 +456,14 @@ block testRunOutputFmtVcfUncompressed:
   let (cnt, _) = execCmdEx("grep -c '^[^#]' " & outFile & " 2>/dev/null || true")
   doAssert cnt.strip.parseInt > 0, "C21: output has no records"
   removeDir(tmpDir)
-  echo "PASS C21 run -Ov: VCF uncompressed output, records intact"
-
-echo ""
-echo "All C18-C21 -O output format tests passed."
+  echo "PASS CL21 run -Ov: VCF uncompressed output, records intact"
 
 # ===========================================================================
-# C26 — scatter -Oz/-Ou and gather -Oz/-Ou
+# CL26 — scatter -Oz/-Ou and gather -Oz/-Ou
 # ===========================================================================
 
 # ---------------------------------------------------------------------------
-# C26.1 — scatter -Oz: shard files are BGZF
+# CL26.1 — scatter -Oz: shard files are BGZF
 # ---------------------------------------------------------------------------
 
 block testScatterOz:
@@ -483,10 +474,10 @@ block testScatterOz:
   doAssert isBgzf(tmpDir / "shard_1.shard.vcf.gz"), "C26.1: shard 1 not BGZF"
   doAssert isBgzf(tmpDir / "shard_2.shard.vcf.gz"), "C26.1: shard 2 not BGZF"
   removeDir(tmpDir)
-  echo "PASS C26.1 scatter -Oz: BGZF shard files produced"
+  echo "PASS CL26.1 scatter -Oz: BGZF shard files produced"
 
 # ---------------------------------------------------------------------------
-# C26.2 — scatter -Ov: shard files are uncompressed VCF
+# CL26.2 — scatter -Ov: shard files are uncompressed VCF
 # ---------------------------------------------------------------------------
 
 block testScatterOv:
@@ -497,10 +488,10 @@ block testScatterOv:
   doAssert not isBgzf(tmpDir / "shard_1.shard.vcf"), "C26.2: shard 1 should not be BGZF"
   doAssert not isBgzf(tmpDir / "shard_2.shard.vcf"), "C26.2: shard 2 should not be BGZF"
   removeDir(tmpDir)
-  echo "PASS C26.2 scatter -Ov: uncompressed VCF shard files produced"
+  echo "PASS CL26.2 scatter -Ov: uncompressed VCF shard files produced"
 
 # ---------------------------------------------------------------------------
-# C26.3 — scatter -Oz -Oz (duplicate): exits non-zero
+# CL26.3 — scatter -Oz -Oz (duplicate): exits non-zero
 # ---------------------------------------------------------------------------
 
 block testScatterOzDuplicate:
@@ -508,10 +499,10 @@ block testScatterOzDuplicate:
   doAssert code != 0, &"C26.3: duplicate -Oz should exit non-zero, got {code}"
   doAssert "only one" in outp or "allowed" in outp,
     &"C26.3: expected 'only one' in error, got:\n{outp}"
-  echo "PASS C26.3 scatter duplicate -O: exits non-zero"
+  echo "PASS CL26.3 scatter duplicate -O: exits non-zero"
 
 # ---------------------------------------------------------------------------
-# C26.4 — scatter extension inference: .vcf.gz → BGZF, .vcf → uncompressed
+# CL26.4 — scatter extension inference: .vcf.gz → BGZF, .vcf → uncompressed
 # ---------------------------------------------------------------------------
 
 block testScatterExtInfer:
@@ -527,10 +518,10 @@ block testScatterExtInfer:
   doAssert c2 == 0, &"C26.4b scatter .vcf exited {c2}:\n{o2}"
   doAssert not isBgzf(d2 / "shard_1.shard.vcf"), "C26.4b: shard 1 should not be BGZF"
   removeDir(d2)
-  echo "PASS C26.4 scatter extension inference: .vcf.gz→BGZF, .vcf→uncompressed"
+  echo "PASS CL26.4 scatter extension inference: .vcf.gz→BGZF, .vcf→uncompressed"
 
 # ---------------------------------------------------------------------------
-# C26.5 — run -Oz -Oz (duplicate): exits non-zero
+# CL26.5 — run -Oz -Oz (duplicate): exits non-zero
 # ---------------------------------------------------------------------------
 
 block testRunOzDuplicate:
@@ -538,10 +529,10 @@ block testRunOzDuplicate:
   doAssert code != 0, &"C26.5: duplicate -Oz should exit non-zero, got {code}"
   doAssert "only one" in outp or "allowed" in outp,
     &"C26.5: expected 'only one' in error, got:\n{outp}"
-  echo "PASS C26.5 run duplicate -O: exits non-zero"
+  echo "PASS CL26.5 run duplicate -O: exits non-zero"
 
 # ---------------------------------------------------------------------------
-# C26.6 — gather -Oz: output is BGZF
+# CL26.6 — gather -Oz: output is BGZF
 # ---------------------------------------------------------------------------
 
 block testGatherOz:
@@ -558,10 +549,10 @@ block testGatherOz:
   let (cnt, _) = execCmdEx("bcftools view -HG " & outFile & " 2>/dev/null | wc -l")
   doAssert cnt.strip.parseInt > 0, "C26.6: output has no records"
   removeDir(scatterDir)
-  echo "PASS C26.6 gather -Oz: BGZF output, records intact"
+  echo "PASS CL26.6 gather -Oz: BGZF output, records intact"
 
 # ---------------------------------------------------------------------------
-# C26.7 — gather -Ov: output is uncompressed VCF
+# CL26.7 — gather -Ov: output is uncompressed VCF
 # ---------------------------------------------------------------------------
 
 block testGatherOv:
@@ -575,10 +566,10 @@ block testGatherOv:
   doAssert gc == 0, &"C26.7 gather -Ov exited {gc}:\n{go}"
   doAssert not isBgzf(outFile), "C26.7: output should not be BGZF"
   removeDir(scatterDir)
-  echo "PASS C26.7 gather -Ov: uncompressed VCF output"
+  echo "PASS CL26.7 gather -Ov: uncompressed VCF output"
 
 # ---------------------------------------------------------------------------
-# C26.8 — gather -Oz -Oz (duplicate): exits non-zero
+# CL26.8 — gather -Oz -Oz (duplicate): exits non-zero
 # ---------------------------------------------------------------------------
 
 block testGatherOzDuplicate:
@@ -586,17 +577,14 @@ block testGatherOzDuplicate:
   doAssert code != 0, &"C26.8: duplicate -Oz should exit non-zero, got {code}"
   doAssert "only one" in outp or "allowed" in outp,
     &"C26.8: expected 'only one' in error, got:\n{outp}"
-  echo "PASS C26.8 gather duplicate -O: exits non-zero"
-
-echo ""
-echo "All C26 scatter/gather -Oz/-Ou tests passed."
+  echo "PASS CL26.8 gather duplicate -O: exits non-zero"
 
 # ===========================================================================
-# C22–C25 — -d/--decompress retired; -Iu added to run
+# CL22–CL25 — -d/--decompress retired; -Iu added to run
 # ===========================================================================
 
 # ---------------------------------------------------------------------------
-# C22 — scatter -d exits non-zero with helpful error message
+# CL22 — scatter -d exits non-zero with helpful error message
 # ---------------------------------------------------------------------------
 
 block testScatterDecompressRetired:
@@ -604,10 +592,10 @@ block testScatterDecompressRetired:
   doAssert code != 0, &"C22: scatter -d should exit non-zero but got {code}"
   doAssert "retired" in outp or "-Ou" in outp,
     &"C22: expected helpful error mentioning -Ou, got:\n{outp}"
-  echo "PASS C22 scatter -d: exits non-zero with helpful error"
+  echo "PASS CL22 scatter -d: exits non-zero with helpful error"
 
 # ---------------------------------------------------------------------------
-# C23 — scatter --decompress exits non-zero with helpful error message
+# CL23 — scatter --decompress exits non-zero with helpful error message
 # ---------------------------------------------------------------------------
 
 block testScatterDecompressLongRetired:
@@ -615,10 +603,10 @@ block testScatterDecompressLongRetired:
   doAssert code != 0, &"C23: scatter --decompress should exit non-zero but got {code}"
   doAssert "retired" in outp or "-Ou" in outp,
     &"C23: expected helpful error mentioning -Ou, got:\n{outp}"
-  echo "PASS C23 scatter --decompress: exits non-zero with helpful error"
+  echo "PASS CL23 scatter --decompress: exits non-zero with helpful error"
 
 # ---------------------------------------------------------------------------
-# C24 — run -Pv ... +collect+: all records present in output (VCF uncompressed piped)
+# CL24 — run -Pv ... +collect+: all records present in output (VCF uncompressed piped)
 # ---------------------------------------------------------------------------
 
 block testRunPipeTypeVcfCollect:
@@ -634,10 +622,10 @@ block testRunPipeTypeVcfCollect:
   doAssert origCnt.strip == outCnt.strip,
     &"C24: record count mismatch: orig={origCnt.strip} out={outCnt.strip}"
   removeDir(tmpDir)
-  echo "PASS C24 run -Pv +collect+: all records present"
+  echo "PASS CL24 run -Pv +collect+: all records present"
 
 # ---------------------------------------------------------------------------
-# C25 — run -d exits non-zero with helpful error message
+# CL25 — run -d exits non-zero with helpful error message
 # ---------------------------------------------------------------------------
 
 block testRunDecompressRetired:
@@ -646,17 +634,14 @@ block testRunDecompressRetired:
   doAssert code != 0, &"C25: run -d should exit non-zero but got {code}"
   doAssert "retired" in outp or "-Pv" in outp or "-Pu" in outp or "-P" in outp,
     &"C25: expected helpful error mentioning -Pv/-Pu, got:\n{outp}"
-  echo "PASS C25 run -d: exits non-zero with helpful error"
-
-echo ""
-echo "All C22-C25 -d/--decompress retired / -Iu tests passed."
+  echo "PASS CL25 run -d: exits non-zero with helpful error"
 
 # ===========================================================================
-# C27 — +merge+ basic integration
+# CL27 — +merge+ basic integration
 # ===========================================================================
 
 # ---------------------------------------------------------------------------
-# C27 — +merge+: exits zero, output contains all records
+# CL27 — +merge+: exits zero, output contains all records
 # ---------------------------------------------------------------------------
 
 block testMergeBasic:
@@ -674,13 +659,10 @@ block testMergeBasic:
   doAssert outCnt == origCnt,
     &"C27: record count mismatch: orig={origCnt} out={outCnt}"
   removeDir(tmpDir)
-  echo &"PASS C27 +merge+: exits zero, {outCnt} records present"
-
-echo ""
-echo "All C27 +merge+ tests passed."
+  echo &"PASS CL27 +merge+: exits zero, {outCnt} records present"
 
 # ===========================================================================
-# C28 — FD inheritance regression: +concat+ with slow subprocess
+# CL28 — FD inheritance regression: +concat+ with slow subprocess
 # ===========================================================================
 #
 # Regression test for the fd-inheritance deadlock fixed by FD_CLOEXEC.
@@ -710,17 +692,14 @@ block testConcatFdInheritance:
   doAssert outCnt == origCnt,
     &"C28: record count mismatch: orig={origCnt} out={outCnt}"
   removeDir(tmpDir)
-  echo &"PASS C28 +concat+ fd-inheritance: 4 shards, slow subprocess, {outCnt} records"
-
-echo ""
-echo "All C28 FD inheritance tests passed."
+  echo &"PASS CL28 +concat+ fd-inheritance: 4 shards, slow subprocess, {outCnt} records"
 
 # ===========================================================================
-# C29 — -P/--pipe-type and -O/--output-type full letter table (C4)
+# CL29 — -P/--pipe-type and -O/--output-type full letter table
 # ===========================================================================
 
 # ---------------------------------------------------------------------------
-# C29.1 — run -Pv with VCF input: exits 0, records intact
+# CL29.1 — run -Pv with VCF input: exits 0, records intact
 # ---------------------------------------------------------------------------
 
 block testPipeTypeVcfUncompress:
@@ -734,10 +713,10 @@ block testPipeTypeVcfUncompress:
   let (outCnt, _)  = execCmdEx("bcftools view -HG " & outFile  & " 2>/dev/null | wc -l")
   doAssert origCnt.strip == outCnt.strip, &"C29.1: record count mismatch"
   removeDir(tmpDir)
-  echo "PASS C29.1 run -Pv VCF input: exits 0, records intact"
+  echo "PASS CL29.1 run -Pv VCF input: exits 0, records intact"
 
 # ---------------------------------------------------------------------------
-# C29.2 — run -Pv with BCF input: exits non-zero (sniff mismatch)
+# CL29.2 — run -Pv with BCF input: exits non-zero (sniff mismatch)
 # ---------------------------------------------------------------------------
 
 block testPipeTypeVcfWithBcfInput:
@@ -750,10 +729,10 @@ block testPipeTypeVcfWithBcfInput:
   doAssert "BCF" in outp or "format conversion" in outp or "pipeline" in outp,
     &"C29.2: expected format mismatch error, got:\n{outp}"
   removeDir(tmpDir)
-  echo "PASS C29.2 run -Pv BCF input: exits non-zero (sniff mismatch)"
+  echo "PASS CL29.2 run -Pv BCF input: exits non-zero (sniff mismatch)"
 
 # ---------------------------------------------------------------------------
-# C29.3 — run -Pb with BCF input: exits 0 (raw BGZF piped)
+# CL29.3 — run -Pb with BCF input: exits 0 (raw BGZF piped)
 # ---------------------------------------------------------------------------
 
 block testPipeTypeBcfBgzf:
@@ -767,10 +746,10 @@ block testPipeTypeBcfBgzf:
   let (outCnt, _)  = execCmdEx("bcftools view -HG " & outFile  & " 2>/dev/null | wc -l")
   doAssert origCnt.strip == outCnt.strip, &"C29.3: record count mismatch"
   removeDir(tmpDir)
-  echo "PASS C29.3 run -Pb BCF input: exits 0 (raw BGZF piped), records intact"
+  echo "PASS CL29.3 run -Pb BCF input: exits 0 (raw BGZF piped), records intact"
 
 # ---------------------------------------------------------------------------
-# C29.4 — run -Pz with VCF input: exits 0 (raw BGZF piped)
+# CL29.4 — run -Pz with VCF input: exits 0 (raw BGZF piped)
 # ---------------------------------------------------------------------------
 
 block testPipeTypeVcfBgzf:
@@ -784,10 +763,10 @@ block testPipeTypeVcfBgzf:
   let (outCnt, _)  = execCmdEx("bcftools view -HG " & outFile  & " 2>/dev/null | wc -l")
   doAssert origCnt.strip == outCnt.strip, &"C29.4: record count mismatch"
   removeDir(tmpDir)
-  echo "PASS C29.4 run -Pz VCF input: exits 0 (raw BGZF piped), records intact"
+  echo "PASS CL29.4 run -Pz VCF input: exits 0 (raw BGZF piped), records intact"
 
 # ---------------------------------------------------------------------------
-# C29.5 — run -Pu with BCF input: exits 0 (BCF uncompressed piped)
+# CL29.5 — run -Pu with BCF input: exits 0 (BCF uncompressed piped)
 # ---------------------------------------------------------------------------
 
 block testPipeTypeBcfUncompress:
@@ -801,10 +780,10 @@ block testPipeTypeBcfUncompress:
   let (outCnt, _)  = execCmdEx("bcftools view -HG " & outFile  & " 2>/dev/null | wc -l")
   doAssert origCnt.strip == outCnt.strip, &"C29.5: record count mismatch"
   removeDir(tmpDir)
-  echo "PASS C29.5 run -Pu BCF input: exits 0 (BCF uncompressed piped), records intact"
+  echo "PASS CL29.5 run -Pu BCF input: exits 0 (BCF uncompressed piped), records intact"
 
 # ---------------------------------------------------------------------------
-# C29.6 — run -Px unknown letter: exits non-zero
+# CL29.6 — run -Px unknown letter: exits non-zero
 # ---------------------------------------------------------------------------
 
 block testPipeTypeUnknownLetter:
@@ -813,10 +792,10 @@ block testPipeTypeUnknownLetter:
   doAssert code != 0, &"C29.6: -Px should exit non-zero, got {code}"
   doAssert "accepted" in outp or "letter" in outp or "z" in outp,
     &"C29.6: expected letter error, got:\n{outp}"
-  echo "PASS C29.6 run -Px: exits non-zero (unknown letter)"
+  echo "PASS CL29.6 run -Px: exits non-zero (unknown letter)"
 
 # ---------------------------------------------------------------------------
-# C29.7 — run -Iu exits non-zero with retired hint
+# CL29.7 — run -Iu exits non-zero with retired hint
 # ---------------------------------------------------------------------------
 
 block testInputUncompressRetiredHint:
@@ -825,10 +804,10 @@ block testInputUncompressRetiredHint:
   doAssert code != 0, &"C29.7: -Iu should exit non-zero, got {code}"
   doAssert "retired" in outp or "-P" in outp,
     &"C29.7: expected retired hint, got:\n{outp}"
-  echo "PASS C29.7 run -Iu: exits non-zero with retired hint"
+  echo "PASS CL29.7 run -Iu: exits non-zero with retired hint"
 
 # ---------------------------------------------------------------------------
-# C29.8 — scatter -Ob with VCF input: exits non-zero (sniff mismatch)
+# CL29.8 — scatter -Ob with VCF input: exits non-zero (sniff mismatch)
 # ---------------------------------------------------------------------------
 
 block testScatterObVcfInput:
@@ -836,10 +815,10 @@ block testScatterObVcfInput:
   doAssert code != 0, &"C29.8: scatter -Ob with VCF input should exit non-zero, got {code}"
   doAssert "VCF" in outp or "format conversion" in outp or "pipeline" in outp,
     &"C29.8: expected format mismatch error, got:\n{outp}"
-  echo "PASS C29.8 scatter -Ob VCF input: exits non-zero (sniff mismatch)"
+  echo "PASS CL29.8 scatter -Ob VCF input: exits non-zero (sniff mismatch)"
 
 # ---------------------------------------------------------------------------
-# C29.9 — scatter -Ov with BCF input: exits non-zero (sniff mismatch)
+# CL29.9 — scatter -Ov with BCF input: exits non-zero (sniff mismatch)
 # ---------------------------------------------------------------------------
 
 block testScatterOvBcfInput:
@@ -847,10 +826,10 @@ block testScatterOvBcfInput:
   doAssert code != 0, &"C29.9: scatter -Ov with BCF input should exit non-zero, got {code}"
   doAssert "BCF" in outp or "format conversion" in outp or "pipeline" in outp,
     &"C29.9: expected format mismatch error, got:\n{outp}"
-  echo "PASS C29.9 scatter -Ov BCF input: exits non-zero (sniff mismatch)"
+  echo "PASS CL29.9 scatter -Ov BCF input: exits non-zero (sniff mismatch)"
 
 # ---------------------------------------------------------------------------
-# C29.10 — -O z (space-separated) and --output-type z (long form): exits 0
+# CL29.10 — -O z (space-separated) and --output-type z (long form): exits 0
 # ---------------------------------------------------------------------------
 
 block testOutputTypeLongAndSpaceForms:
@@ -867,10 +846,10 @@ block testOutputTypeLongAndSpaceForms:
   doAssert c2 == 0, &"C29.10b run --output-type z exited {c2}:\n{o2}"
   doAssert fileExists(outFile2), "C29.10b: output missing"
   removeDir(tmpDir)
-  echo "PASS C29.10 -O z and --output-type z: exits 0"
+  echo "PASS CL29.10 -O z and --output-type z: exits 0"
 
 # ---------------------------------------------------------------------------
-# C29.11 — --pipe-type v (long form): exits 0, records intact
+# CL29.11 — --pipe-type v (long form): exits 0, records intact
 # ---------------------------------------------------------------------------
 
 block testPipeTypeLongForm:
@@ -885,7 +864,5 @@ block testPipeTypeLongForm:
   let (outCnt, _)  = execCmdEx("bcftools view -HG " & outFile  & " 2>/dev/null | wc -l")
   doAssert origCnt.strip == outCnt.strip, &"C29.11: record count mismatch"
   removeDir(tmpDir)
-  echo "PASS C29.11 --pipe-type v: exits 0, records intact"
+  echo "PASS CL29.11 --pipe-type v: exits 0, records intact"
 
-echo ""
-echo "All C29 -P/--pipe-type and -O/--output-type full letter tests passed."

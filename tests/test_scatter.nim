@@ -34,7 +34,7 @@ block testParseTbi:
     let magic = readMagic(SmallVcf, off)
     doAssert magic[0] == 0x1f and magic[1] == 0x8b,
       &"bad BGZF magic at offset {off}"
-  echo &"PASS parseTbiBlockStarts ({starts.len} blocks)"
+  echo &"PASS SC1.1 parseTbiBlockStarts: {starts.len} blocks"
 
 # ---------------------------------------------------------------------------
 # SC2 — testReadIndexBlockStartsTbi: readIndexBlockStarts falls back to TBI
@@ -44,7 +44,7 @@ block testReadIndexBlockStartsTbi:
   doAssert starts.len > 0, "readIndexBlockStarts (TBI): no blocks"
   for i in 1 ..< starts.len:
     doAssert starts[i] > starts[i-1], "readIndexBlockStarts (TBI): not sorted"
-  echo &"PASS readIndexBlockStarts via TBI ({starts.len} blocks)"
+  echo &"PASS SC1.2 readIndexBlockStarts via TBI: {starts.len} blocks"
 
 # ---------------------------------------------------------------------------
 # SC3 — testParseCsi: CSI-only fixture; offsets valid and strictly increasing
@@ -60,7 +60,7 @@ block testParseCsi:
     let magic = readMagic(CsiVcf, off)
     doAssert magic[0] == 0x1f and magic[1] == 0x8b,
       &"bad BGZF magic at offset {off}"
-  echo &"PASS parseCsiBlockStarts ({starts.len} blocks)"
+  echo &"PASS SC1.3 parseCsiBlockStarts: {starts.len} blocks"
 
 # ---------------------------------------------------------------------------
 # SC4 — testReadIndexBlockStartsCsi: readIndexBlockStarts falls through to CSI
@@ -70,7 +70,7 @@ block testReadIndexBlockStartsCsi:
   doAssert starts.len > 0, "readIndexBlockStarts (CSI): no blocks"
   for i in 1 ..< starts.len:
     doAssert starts[i] > starts[i-1], "readIndexBlockStarts (CSI): not sorted"
-  echo &"PASS readIndexBlockStarts via CSI ({starts.len} blocks)"
+  echo &"PASS SC1.4 readIndexBlockStarts via CSI: {starts.len} blocks"
 
 # ===========================================================================
 # SC5–SC10 — Boundary computation: header extraction, lengths, partition, validation
@@ -93,7 +93,7 @@ block testGetHeaderAndFirstBlock:
   let magic = readMagic(SmallVcf, firstBlock)
   doAssert magic[0] == 0x1f and magic[1] == 0x8b,
     &"getHeaderAndFirstBlock: firstBlock {firstBlock} has bad BGZF magic"
-  echo &"PASS getHeaderAndFirstBlock (firstBlock={firstBlock})"
+  echo &"PASS SC2.1 getHeaderAndFirstBlock: firstBlock={firstBlock}"
 
 # ---------------------------------------------------------------------------
 # SC6 — testGetLengths: converts block starts to cumulative lengths correctly
@@ -103,7 +103,7 @@ block testGetLengths:
   let lengths = getLengths(starts, 1000)
   doAssert lengths == @[100'i64, 200, 400, 300],
     &"getLengths: expected [100,200,400,300] got {lengths}"
-  echo "PASS getLengths"
+  echo "PASS SC2.2 getLengths"
 
 # ---------------------------------------------------------------------------
 # SC7 — testPartitionBoundaries2: 4 equal blocks → 2 shards → 1 boundary at index 1
@@ -114,7 +114,7 @@ block testPartitionBoundaries2:
   let bounds = partitionBoundaries(lengths, 2)
   doAssert bounds.len == 1, &"partitionBoundaries 2: expected 1 bound, got {bounds.len}"
   doAssert bounds[0] == 1, &"partitionBoundaries 2: expected index 1, got {bounds[0]}"
-  echo "PASS partitionBoundaries (2 shards)"
+  echo "PASS SC3.1 partitionBoundaries: 2 shards"
 
 # ---------------------------------------------------------------------------
 # SC8 — testPartitionBoundaries4: 8 equal blocks → 4 shards → boundaries [1,3,5]
@@ -125,7 +125,7 @@ block testPartitionBoundaries4:
   let bounds = partitionBoundaries(lengths, 4)
   doAssert bounds.len == 3, &"partitionBoundaries 4: expected 3 bounds, got {bounds.len}"
   doAssert bounds == @[1, 3, 5], &"partitionBoundaries 4: expected [1,3,5] got {bounds}"
-  echo "PASS partitionBoundaries (4 shards)"
+  echo "PASS SC3.2 partitionBoundaries: 4 shards"
 
 # ---------------------------------------------------------------------------
 # SC9 — testIsValidBoundary: every non-EOF data block in small.vcf.gz is a valid boundary
@@ -148,7 +148,7 @@ block testIsValidBoundary:
       validCount += 1
   f.close()
   doAssert validCount > 0, "isValidBoundary: no valid blocks found"
-  echo &"PASS isValidBoundary ({validCount} valid blocks)"
+  echo &"PASS SC3.3 isValidBoundary: {validCount} valid blocks"
 
 # ---------------------------------------------------------------------------
 # SC10 — testOptimiseBoundaries4: 4 shards; all boundaries valid; all lengths > 0
@@ -172,7 +172,7 @@ block testOptimiseBoundaries4:
   # Lengths must be non-zero
   for l in lengths:
     doAssert l > 0, "optimiseBoundaries: zero-length block"
-  echo &"PASS optimiseBoundaries 4-shard ({finalStarts.len} fine blocks)"
+  echo &"PASS SC3.4 optimiseBoundaries: 4-shard, {finalStarts.len} fine blocks"
 
 # ===========================================================================
 # SC11–SC15 — VCF scatter end-to-end (TBI, CSI, --force-scan)
@@ -250,7 +250,7 @@ block testScanAllBlockStarts:
       &"scanAllBlockStarts: bad BGZF magic at offset {off}"
   for i in 1 ..< starts.len:
     doAssert starts[i] > starts[i-1], "scanAllBlockStarts: not strictly increasing"
-  echo &"PASS scanAllBlockStarts ({starts.len} data blocks, firstBlock={firstBlock})"
+  echo &"PASS SC4.1 scanAllBlockStarts: {starts.len} data blocks"
 
 # ---------------------------------------------------------------------------
 # SC12 — testScatter4ShardsTbi: 4 shards (TBI); BGZF structure, completeness, order, size balance
@@ -270,7 +270,7 @@ block testScatter4ShardsTbi:
   doAssert maxSz.float / minSz.float < 2.0,
     &"scatter (TBI): shard size imbalance: max={maxSz} min={minSz}"
 
-  echo "PASS scatter TBI: BGZF structure, header, completeness, order, balance"
+  echo "PASS SC5.1 scatter TBI: 4 shards, completeness, order, balance"
   removeDir(tmpDir)
 
 # ---------------------------------------------------------------------------
@@ -283,7 +283,7 @@ block testScatterForceScan:
   let tmpl = tmpDir / "shard.{}.vcf.gz"
   scatter(SmallVcf, 4, tmpl, 1, forceScan = true)
   checkShards(SmallVcf, tmpl, 4)
-  echo "PASS scatter --force-scan: BGZF structure, header, completeness, order"
+  echo "PASS SC5.2 scatter --force-scan: completeness, order"
   removeDir(tmpDir)
 
 # ---------------------------------------------------------------------------
@@ -296,7 +296,7 @@ block testScatter4ShardsCsi:
   let tmpl = tmpDir / "shard.{}.vcf.gz"
   scatter(CsiVcf, 4, tmpl)
   checkShards(CsiVcf, tmpl, 4)
-  echo "PASS scatter CSI: BGZF structure, header, completeness, order"
+  echo "PASS SC5.3 scatter CSI: 4 shards, completeness, order"
   removeDir(tmpDir)
 
 # ===========================================================================
@@ -338,7 +338,7 @@ block testExtractBcfHeaderSmall:
     pos += blkSz
   doAssert totalDecomp == expectedSize,
     &"extractBcfHeader: decompressed {totalDecomp} bytes, expected {expectedSize}"
-  echo &"PASS extractBcfHeader small.bcf (l_text={lText})"
+  echo &"PASS SC6.1 extractBcfHeader: small.bcf, l_text={lText}"
 
 # ---------------------------------------------------------------------------
 # SC17 — testExtractBcfHeaderLarge: large BCF (2504 samples); multi-block header decompresses correctly
@@ -369,7 +369,7 @@ block testExtractBcfHeaderLarge:
     pos += blkSz
   doAssert totalDecomp == expectedSize,
     &"extractBcfHeader large: decompressed {totalDecomp} bytes, expected {expectedSize}"
-  echo &"PASS extractBcfHeader chr22_1kg.bcf (l_text={lText})"
+  echo &"PASS SC6.2 extractBcfHeader: chr22_1kg.bcf, l_text={lText}"
 
 # (checkBcfShards helper follows)
 
@@ -469,7 +469,7 @@ block testBcfScatter4Shards:
   doAssert minSz > 0, "BCF scatter 4 shards: at least one shard is empty"
   doAssert maxSz.float / minSz.float < 2.0,
     &"BCF scatter 4 shards: shard size imbalance: max={maxSz} min={minSz}"
-  echo "PASS BCF scatter 4 shards: BGZF, BCF magic, completeness, order, balance"
+  echo "PASS SC7.1 BCF scatter: 4 shards, completeness, order, balance"
   removeDir(tmpDir)
 
 # ---------------------------------------------------------------------------
@@ -482,8 +482,6 @@ block testBcfScatterLargeHeader:
   let tmpl = tmpDir / "shard.{}.bcf"
   scatter(KgBcf, 4, tmpl, format = ffBcf)
   checkBcfShards(KgBcf, tmpl, 4)
-  echo "PASS BCF scatter chr22_1kg.bcf 4 shards: large header handled correctly"
+  echo "PASS SC7.2 BCF scatter: chr22_1kg.bcf large header, 4 shards"
   removeDir(tmpDir)
 
-echo ""
-echo "All scatter tests passed."

@@ -1,4 +1,4 @@
-## Tests for M5 — +merge+ k-way merge output in run.nim.
+## Tests for MG — +merge+ k-way merge output in run.nim.
 ## Run from project root: nim c -r tests/test_merge.nim
 ## Requires: tests/data/small.vcf.gz, tests/data/small.bcf
 
@@ -16,7 +16,7 @@ block buildBinary:
       echo "nimble build failed:\n", outp
       quit(1)
   doAssert fileExists(BinPath), "binary not found: " & BinPath & " (run nimble build)"
-  echo "PASS binary available"
+  echo "PASS MG0 binary available"
 
 proc runBin(args: string): (string, int) =
   execCmdEx(BinPath & " run " & args & " 2>&1")
@@ -64,7 +64,7 @@ proc isSortedVcf(path: string): bool =
   true
 
 # ---------------------------------------------------------------------------
-# M5.1 — VCF +merge+ 4 shards: bcftools view -Ov pipeline; sorted and complete
+# MG1 — VCF +merge+ 4 shards: bcftools view -Ov pipeline; sorted and complete
 # ---------------------------------------------------------------------------
 block testMergeVcf4Shards:
   doAssert fileExists(SmallVcf), &"VCF fixture missing: {SmallVcf}"
@@ -73,21 +73,21 @@ block testMergeVcf4Shards:
   let outFile = tmpDir / "out.vcf"
   let (outp, code) = runBin(
     &"-n 4 -o {outFile} {SmallVcf} ::: bcftools view -Ov +merge+")
-  doAssert code == 0, &"M5.1: +merge+ exited {code}:\n{outp}"
-  doAssert fileExists(outFile), "M5.1: output file missing"
+  doAssert code == 0, &"MG1: +merge+ exited {code}:\n{outp}"
+  doAssert fileExists(outFile), "MG1: output file missing"
   let origCnt = vcfRecordCount(SmallVcf)
   # Get count from input BGZF via bcftools
   let (bco, _) = execCmdEx("bcftools view -H " & SmallVcf & " 2>/dev/null | wc -l")
   let origCount = bco.strip.parseInt
   let outCount  = vcfRecordCount(outFile)
   doAssert outCount == origCount,
-    &"M5.1: record count mismatch: got {outCount}, expected {origCount}"
-  doAssert isSortedVcf(outFile), "M5.1: output is not sorted by (contig, pos)"
+    &"MG1: record count mismatch: got {outCount}, expected {origCount}"
+  doAssert isSortedVcf(outFile), "MG1: output is not sorted by (contig, pos)"
   removeDir(tmpDir)
-  echo &"PASS M5.1 +merge+ VCF: 4 shards, {outCount} records, sorted"
+  echo &"PASS MG1 +merge+ VCF: 4 shards, {outCount} records, sorted"
 
 # ---------------------------------------------------------------------------
-# M5.2 — BCF input, cat pipeline (BGZF pass-through): warning emitted, records present
+# MG2 — BCF input, cat pipeline (BGZF pass-through): warning emitted, records present
 # ---------------------------------------------------------------------------
 block testMergeBcfCat:
   doAssert fileExists(SmallBcf), &"BCF fixture missing: {SmallBcf}"
@@ -98,19 +98,19 @@ block testMergeBcfCat:
   # which +merge+ can read as VCF records (simpler than raw BCF output).
   let (outp, code) = runBin(
     &"-n 4 -o {outFile} {SmallBcf} ::: bcftools view -Ov +merge+")
-  doAssert code == 0, &"M5.2: BCF +merge+ exited {code}:\n{outp}"
-  doAssert fileExists(outFile), "M5.2: output file missing"
+  doAssert code == 0, &"MG2: BCF +merge+ exited {code}:\n{outp}"
+  doAssert fileExists(outFile), "MG2: output file missing"
   let (bco, _) = execCmdEx("bcftools view -H " & SmallBcf & " 2>/dev/null | wc -l")
   let origCount = bco.strip.parseInt
   let outCount  = vcfRecordCount(outFile)
   doAssert outCount == origCount,
-    &"M5.2: BCF record count mismatch: got {outCount}, expected {origCount}"
-  doAssert isSortedVcf(outFile), "M5.2: BCF +merge+ output is not sorted"
+    &"MG2: BCF record count mismatch: got {outCount}, expected {origCount}"
+  doAssert isSortedVcf(outFile), "MG2: BCF +merge+ output is not sorted"
   removeDir(tmpDir)
-  echo &"PASS M5.2 +merge+ BCF input: 4 shards, {outCount} records, sorted"
+  echo &"PASS MG2 +merge+ BCF input: 4 shards, {outCount} records, sorted"
 
 # ---------------------------------------------------------------------------
-# M5.3 — Stdout output: no -o, output captured from stdout, records present
+# MG3 — Stdout output: no -o, output captured from stdout, records present
 # ---------------------------------------------------------------------------
 block testMergeStdout:
   doAssert fileExists(SmallVcf), &"VCF fixture missing: {SmallVcf}"
@@ -121,19 +121,19 @@ block testMergeStdout:
   let (_, code) = execCmdEx(
     BinPath & " run -n 4 " & SmallVcf &
     " ::: bcftools view -Ov +merge+ > " & outFile & " 2>/dev/null")
-  doAssert code == 0, &"M5.3: stdout +merge+ exited {code}"
-  doAssert fileExists(outFile), "M5.3: stdout output file missing"
+  doAssert code == 0, &"MG3: stdout +merge+ exited {code}"
+  doAssert fileExists(outFile), "MG3: stdout output file missing"
   let (bco, _) = execCmdEx("bcftools view -H " & SmallVcf & " 2>/dev/null | wc -l")
   let origCount = bco.strip.parseInt
   let outCount  = vcfRecordCount(outFile)
   doAssert outCount == origCount,
-    &"M5.3: stdout record count: got {outCount}, expected {origCount}"
-  doAssert isSortedVcf(outFile), "M5.3: stdout output is not sorted"
+    &"MG3: stdout record count: got {outCount}, expected {origCount}"
+  doAssert isSortedVcf(outFile), "MG3: stdout output is not sorted"
   removeDir(tmpDir)
-  echo &"PASS M5.3 +merge+ stdout: {outCount} records, sorted"
+  echo &"PASS MG3 +merge+ stdout: {outCount} records, sorted"
 
 # ---------------------------------------------------------------------------
-# M5.4 — BGZF pipeline (cat): warning triggered, records present
+# MG4 — BGZF pipeline (cat): warning triggered, records present
 # ---------------------------------------------------------------------------
 block testMergeBgzfWarning:
   doAssert fileExists(SmallVcf), &"VCF fixture missing: {SmallVcf}"
@@ -143,17 +143,15 @@ block testMergeBgzfWarning:
   # cat passes BGZF bytes unchanged → feeder decompresses and warns.
   let (outp, code) = runBin(
     &"-n 4 -o {outFile} {SmallVcf} ::: cat +merge+")
-  doAssert code == 0, &"M5.4: BGZF cat +merge+ exited {code}:\n{outp}"
+  doAssert code == 0, &"MG4: BGZF cat +merge+ exited {code}:\n{outp}"
   doAssert "works best with uncompressed" in outp,
-    &"M5.4: expected BGZF warning in output, got:\n{outp}"
-  doAssert fileExists(outFile), "M5.4: output file missing"
+    &"MG4: expected BGZF warning in output, got:\n{outp}"
+  doAssert fileExists(outFile), "MG4: output file missing"
   let (bco, _) = execCmdEx("bcftools view -H " & SmallVcf & " 2>/dev/null | wc -l")
   let origCount = bco.strip.parseInt
   let outCount  = vcfRecordCount(outFile)
   doAssert outCount == origCount,
-    &"M5.4: BGZF cat record count: got {outCount}, expected {origCount}"
+    &"MG4: BGZF cat record count: got {outCount}, expected {origCount}"
   removeDir(tmpDir)
-  echo &"PASS M5.4 +merge+ BGZF pipeline: warning emitted, {outCount} records present"
+  echo &"PASS MG4 +merge+ BGZF pipeline: warning emitted, {outCount} records present"
 
-echo ""
-echo "All M5 merge tests passed."
