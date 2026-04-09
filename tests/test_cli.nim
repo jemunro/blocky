@@ -410,5 +410,210 @@ block testConcatFdInheritance:
   removeDir(tmpDir)
   echo &"PASS CL28 +concat+ fd-inheritance: 4 shards, slow subprocess, {outCnt} records"
 
+# ===========================================================================
+# CL31 — -n exceeds index entry count
+# ===========================================================================
+# Scatter and run paths must reject nShards > available index entries with a
+# clear error message rather than producing empty shards. Tests cover:
+#   CL31.1 — scatter VCF: error suggests --force-scan
+#   CL31.2 — scatter BCF: error does NOT suggest --force-scan (BCF can't scan)
+#   CL31.3 — scatter VCF --force-scan: succeeds when raw blocks > requested n
+#   CL31.4 — run +merge+ VCF: same error path as scatter
+#   CL31.5 — -n at the exact limit succeeds (boundary check)
 
+# ---------------------------------------------------------------------------
+# CL31.1 — scatter -n way too high on VCF: errors, suggests --force-scan
+# ---------------------------------------------------------------------------
+
+block testScatterTooManyShardsVcf:
+  let tmpDir = createTempDir("vcfparty_", "")
+  # chr22_1kg.vcf.gz has only 57 index entries; -n 100 must error.
+  let (outp, code) = run(&"scatter -n 100 -o {tmpDir}/shard_{{}}.vcf.gz {KgVcf}")
+  doAssert code != 0,
+    &"CL31.1: -n 100 on chr22_1kg.vcf.gz (57 voffs) should error, got {code}:\n{outp}"
+  doAssert "index entries" in outp,
+    &"CL31.1: error should mention 'index entries', got: {outp}"
+  doAssert "--force-scan" in outp,
+    &"CL31.1: VCF error should suggest --force-scan, got: {outp}"
+  removeDir(tmpDir)
+  echo "PASS CL31.1 scatter -n too high VCF: errors with --force-scan suggestion"
+
+# ---------------------------------------------------------------------------
+# CL31.2 — scatter -n way too high on BCF: errors, NO --force-scan suggestion
+# ---------------------------------------------------------------------------
+
+block testScatterTooManyShardsBcf:
+  doAssert fileExists(DataDir / "chr22_1kg.bcf"),
+    "chr22_1kg.bcf fixture missing — run generate_fixtures.sh"
+  let tmpDir = createTempDir("vcfparty_", "")
+  # chr22_1kg.bcf has only 58 index entries; -n 100 must error.
+  let (outp, code) = run(
+    &"scatter -n 100 -o {tmpDir}/shard_{{}}.bcf {DataDir}/chr22_1kg.bcf")
+  doAssert code != 0,
+    &"CL31.2: -n 100 on chr22_1kg.bcf (58 voffs) should error, got {code}:\n{outp}"
+  doAssert "index entries" in outp,
+    &"CL31.2: error should mention 'index entries', got: {outp}"
+  doAssert "--force-scan" notin outp,
+    &"CL31.2: BCF error should NOT suggest --force-scan, got: {outp}"
+  removeDir(tmpDir)
+  echo "PASS CL31.2 scatter -n too high BCF: errors without --force-scan suggestion"
+
+# ---------------------------------------------------------------------------
+# CL31.3 — scatter --force-scan VCF: succeeds when raw blocks exceed -n
+# ---------------------------------------------------------------------------
+
+block testScatterForceScanRecovers:
+  let tmpDir = createTempDir("vcfparty_", "")
+  # chr22_1kg.vcf.gz has 57 voffs but ~834 raw BGZF blocks; --force-scan
+  # gives access to all raw blocks so -n 100 works.
+  let (outp, code) = run(
+    &"scatter -n 100 --force-scan -o {tmpDir}/shard_{{}}.vcf.gz {KgVcf}")
+  doAssert code == 0,
+    &"CL31.3: --force-scan with -n 100 should succeed, got {code}:\n{outp}"
+  let shards = toSeq(walkFiles(tmpDir / "shard_*.vcf.gz"))
+  doAssert shards.len == 100,
+    &"CL31.3: expected 100 shards, got {shards.len}"
+  # Sanity-check record count
+  let origCnt = execCmdEx(
+    "bcftools view -H " & KgVcf & " 2>/dev/null | wc -l")[0].strip.parseInt
+  var outCnt = 0
+  for s in shards:
+    outCnt += execCmdEx(
+      "bcftools view -H " & s & " 2>/dev/null | wc -l")[0].strip.parseInt
+  doAssert outCnt == origCnt,
+    &"CL31.3: record count mismatch: orig={origCnt} shards={outCnt}"
+  removeDir(tmpDir)
+  echo &"PASS CL31.3 scatter --force-scan recovers: 100 shards, {outCnt} records"
+
+# ---------------------------------------------------------------------------
+# CL31.4 — run +merge+ -n too high errors with same path
+# ---------------------------------------------------------------------------
+
+block testRunMergeTooManyShards:
+  doAssert fileExists(DataDir / "chr22_1kg.bcf"),
+    "chr22_1kg.bcf fixture missing — run generate_fixtures.sh"
+  let tmpDir = createTempDir("vcfparty_", "")
+  let (outp, code) = run(
+    &"run -n 100 -o {tmpDir}/out.vcf.gz {DataDir}/chr22_1kg.bcf ::: bcftools view -Ov +merge+")
+  doAssert code != 0,
+    &"CL31.4: run +merge+ -n 100 on chr22_1kg.bcf should error, got {code}:\n{outp}"
+  doAssert "index entries" in outp,
+    &"CL31.4: error should mention 'index entries', got: {outp}"
+  removeDir(tmpDir)
+  echo "PASS CL31.4 run +merge+ -n too high: errors"
+
+# ---------------------------------------------------------------------------
+# CL31.5 — -n at the exact voff count succeeds
+# ---------------------------------------------------------------------------
+
+block testScatterNAtLimit:
+  let tmpDir = createTempDir("vcfparty_", "")
+  # chr22_1kg.vcf.gz has 57 voffs; -n 57 must succeed.
+  let (outp, code) = run(&"scatter -n 57 -o {tmpDir}/shard_{{}}.vcf.gz {KgVcf}")
+  doAssert code == 0,
+    &"CL31.5: -n 57 (== voff count) should succeed, got {code}:\n{outp}"
+  let shards = toSeq(walkFiles(tmpDir / "shard_*.vcf.gz"))
+  doAssert shards.len == 57,
+    &"CL31.5: expected 57 shards, got {shards.len}"
+  removeDir(tmpDir)
+  echo "PASS CL31.5 scatter -n at exact voff limit: 57 shards"
+
+# ===========================================================================
+# CL32 — --clamp-shards reduces -n instead of erroring
+# ===========================================================================
+# When --clamp-shards is set and -n exceeds the available index entries, the
+# tool prints an info line and silently produces fewer shards rather than
+# erroring out (CL31's no-clamp behaviour).
+
+# ---------------------------------------------------------------------------
+# CL32.1 — scatter --clamp-shards on VCF: -n 100 → 57 shards
+# ---------------------------------------------------------------------------
+
+block testScatterClampShardsVcf:
+  let tmpDir = createTempDir("vcfparty_", "")
+  # chr22_1kg.vcf.gz has 57 index entries; -n 100 must clamp to 57.
+  let (outp, code) = run(
+    &"scatter -n 100 --clamp-shards -o {tmpDir}/shard_{{}}.vcf.gz {KgVcf}")
+  doAssert code == 0,
+    &"CL32.1: --clamp-shards should succeed, got {code}:\n{outp}"
+  doAssert "clamp-shards" in outp,
+    &"CL32.1: info should mention 'clamp-shards', got: {outp}"
+  let shards = toSeq(walkFiles(tmpDir / "shard_*.vcf.gz"))
+  doAssert shards.len == 57,
+    &"CL32.1: expected 57 clamped shards, got {shards.len}"
+  # Sanity-check record count matches the original.
+  let origCnt = execCmdEx(
+    "bcftools view -H " & KgVcf & " 2>/dev/null | wc -l")[0].strip.parseInt
+  var outCnt = 0
+  for s in shards:
+    outCnt += execCmdEx(
+      "bcftools view -H " & s & " 2>/dev/null | wc -l")[0].strip.parseInt
+  doAssert outCnt == origCnt,
+    &"CL32.1: record count mismatch: orig={origCnt} shards={outCnt}"
+  removeDir(tmpDir)
+  echo &"PASS CL32.1 scatter --clamp-shards VCF: 57 shards, {outCnt} records"
+
+# ---------------------------------------------------------------------------
+# CL32.2 — scatter --clamp-shards on BCF: -n 100 → 58 shards
+# ---------------------------------------------------------------------------
+
+block testScatterClampShardsBcf:
+  doAssert fileExists(DataDir / "chr22_1kg.bcf"),
+    "chr22_1kg.bcf fixture missing — run generate_fixtures.sh"
+  let tmpDir = createTempDir("vcfparty_", "")
+  let (outp, code) = run(
+    &"scatter -n 100 --clamp-shards -o {tmpDir}/shard_{{}}.bcf {DataDir}/chr22_1kg.bcf")
+  doAssert code == 0,
+    &"CL32.2: --clamp-shards should succeed, got {code}:\n{outp}"
+  doAssert "clamp-shards" in outp,
+    &"CL32.2: info should mention 'clamp-shards', got: {outp}"
+  let shards = toSeq(walkFiles(tmpDir / "shard_*.bcf"))
+  doAssert shards.len == 58,
+    &"CL32.2: expected 58 clamped shards, got {shards.len}"
+  removeDir(tmpDir)
+  echo &"PASS CL32.2 scatter --clamp-shards BCF: 58 shards"
+
+# ---------------------------------------------------------------------------
+# CL32.3 — run +merge+ --clamp-shards: -n 100 succeeds with clamped count
+# ---------------------------------------------------------------------------
+
+block testRunMergeClampShards:
+  doAssert fileExists(DataDir / "chr22_1kg.bcf"),
+    "chr22_1kg.bcf fixture missing — run generate_fixtures.sh"
+  let tmpDir = createTempDir("vcfparty_", "")
+  let (outp, code) = run(
+    &"run -n 100 --clamp-shards -o {tmpDir}/out.vcf.gz {DataDir}/chr22_1kg.bcf ::: bcftools view -Ov +merge+")
+  doAssert code == 0,
+    &"CL32.3: run +merge+ --clamp-shards should succeed, got {code}:\n{outp}"
+  doAssert "clamp-shards" in outp,
+    &"CL32.3: info should mention 'clamp-shards', got: {outp}"
+  let origCnt = execCmdEx(
+    "bcftools view -H " & DataDir & "/chr22_1kg.bcf 2>/dev/null | wc -l"
+  )[0].strip.parseInt
+  let outCnt = execCmdEx(
+    "bcftools view -H " & tmpDir & "/out.vcf.gz 2>/dev/null | wc -l"
+  )[0].strip.parseInt
+  doAssert outCnt == origCnt,
+    &"CL32.3: record count mismatch: orig={origCnt} merged={outCnt}"
+  removeDir(tmpDir)
+  echo &"PASS CL32.3 run +merge+ --clamp-shards: {outCnt} records"
+
+# ---------------------------------------------------------------------------
+# CL32.4 — --clamp-shards is a no-op when -n already fits
+# ---------------------------------------------------------------------------
+
+block testScatterClampShardsNoop:
+  let tmpDir = createTempDir("vcfparty_", "")
+  # -n 4 is well within 57 voffs; --clamp-shards must not warn or alter count.
+  let (outp, code) = run(
+    &"scatter -n 4 --clamp-shards -o {tmpDir}/shard_{{}}.vcf.gz {KgVcf}")
+  doAssert code == 0,
+    &"CL32.4: --clamp-shards no-op should succeed, got {code}:\n{outp}"
+  doAssert "clamp-shards" notin outp,
+    &"CL32.4: no-op clamp should not emit info line, got: {outp}"
+  let shards = toSeq(walkFiles(tmpDir / "shard_*.vcf.gz"))
+  doAssert shards.len == 4,
+    &"CL32.4: expected 4 shards, got {shards.len}"
+  removeDir(tmpDir)
+  echo "PASS CL32.4 scatter --clamp-shards no-op: 4 shards, no info line"
 

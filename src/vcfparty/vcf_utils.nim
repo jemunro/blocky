@@ -248,113 +248,6 @@ proc compressToBgzfMulti*(data: openArray[byte]; level: int = 6): seq[byte] =
     result.add(compressToBgzf(data[pos ..< chunkEnd], level))
     pos = chunkEnd
 
-proc splitChunk*(path: string; offset: int64; size: int64): (seq[byte], seq[byte]) =
-  ## Read one BGZF block from path at offset/size, decompress it, split the
-  ## lines at the midpoint, and return (head, tail) as recompressed BGZF blocks.
-  let f = open(path, fmRead)
-  f.setFilePos(offset)
-  var raw = newSeq[byte](size)
-  let nRead = readBytes(f, raw, 0, size.int)
-  f.close()
-  if nRead != size.int:
-    quit(&"splitChunk: wanted {size} bytes at {offset} in {path}, got {nRead}", 1)
-  let decompressed = decompressBgzf(raw)
-  # Collect lines with keepends=true, matching Python splitlines(keepends=True).
-  var lines: seq[seq[byte]]
-  var lineStart = 0
-  for i in 0 ..< decompressed.len:
-    if decompressed[i] == byte('\n'):
-      lines.add(decompressed[lineStart .. i])
-      lineStart = i + 1
-  if lineStart < decompressed.len:
-    lines.add(decompressed[lineStart .. ^1])
-  let mid = lines.len div 2
-  var head, tail: seq[byte]
-  for i in 0 ..< mid:      head.add(lines[i])
-  for i in mid ..< lines.len: tail.add(lines[i])
-  result = (compressToBgzf(head), compressToBgzf(tail))
-
-proc bcfFirstDataOffset*(path: string): int64 =
-  ## Return the BGZF file offset of the block that contains the first BCF record.
-  ## The BCF uncompressed layout is: 5-byte magic + 4-byte l_text + l_text header bytes.
-  ## The first record begins at uncompressed offset 5 + 4 + l_text.
-  ## Scans blocks from the start, tracking cumulative uncompressed size, and returns
-  ## the file offset of the block whose range first crosses that threshold.
-  let starts = scanBgzfBlockStarts(path)
-  let f = open(path, fmRead)
-  defer: f.close()
-  var lText = -1'i64
-  var firstRecordUncompOff = -1'i64
-  var cumUncomp = 0'i64
-  var headerBuf: seq[byte]   # accumulates bytes until we can read l_text
-  for off in starts:
-    var hdr = newSeq[byte](18)
-    f.setFilePos(off)
-    if readBytes(f, hdr, 0, 18) < 18: break
-    let blkSize = bgzfBlockSize(hdr)
-    if blkSize <= 0: break
-    var blk = newSeq[byte](blkSize)
-    f.setFilePos(off)
-    discard readBytes(f, blk, 0, blkSize)
-    let decompressed = decompressBgzf(blk)
-    let blockLen = decompressed.len.int64
-    if lText < 0:
-      headerBuf.add(decompressed)
-      if headerBuf.len >= 9:
-        if headerBuf[0] != byte('B') or headerBuf[1] != byte('C') or
-           headerBuf[2] != byte('F') or headerBuf[3] != 0x02'u8 or
-           headerBuf[4] != 0x02'u8:
-          quit(&"bcfFirstDataOffset: {path}: not a BCF file (bad magic)", 1)
-        lText = leU32(headerBuf, 5).int64
-        firstRecordUncompOff = 5'i64 + 4'i64 + lText
-    if firstRecordUncompOff >= 0 and cumUncomp + blockLen > firstRecordUncompOff:
-      return off
-    cumUncomp += blockLen
-  if firstRecordUncompOff < 0:
-    quit(&"bcfFirstDataOffset: {path}: file too short to read BCF header", 1)
-  quit(&"bcfFirstDataOffset: {path}: first record at uncompressed offset " &
-       &"{firstRecordUncompOff} exceeds total uncompressed size {cumUncomp}", 1)
-
-proc splitBcfBoundaryBlock*(path: string; offset: int64; size: int64): (bool, seq[byte], seq[byte]) =
-  ## Read one BGZF block from path at offset/size, decompress it, walk BCF
-  ## records, and split at the record boundary whose byte position is closest
-  ## to the decompressed midpoint.
-  ## Returns (true, head, tail) where head and tail are recompressed BGZF blocks.
-  ## Returns (false, @[], @[]) if the block contains fewer than 2 complete records.
-  let f = open(path, fmRead)
-  f.setFilePos(offset)
-  var raw = newSeq[byte](size)
-  let nRead = readBytes(f, raw, 0, size.int)
-  f.close()
-  if nRead != size.int:
-    quit(&"splitBcfBoundaryBlock: wanted {size} bytes at {offset} in {path}, got {nRead}", 1)
-  let data = decompressBgzf(raw)
-  # Walk BCF records, collecting the end-byte of each complete record.
-  var recEnds: seq[int]
-  var pos = 0
-  while pos + 8 <= data.len:
-    let lShared = leU32(data, pos).int
-    let lIndiv  = leU32(data, pos + 4).int
-    let recLen  = 8 + lShared + lIndiv
-    if pos + recLen > data.len: break   # incomplete record at end of block
-    pos += recLen
-    recEnds.add(pos)
-  if recEnds.len < 2:
-    return (false, @[], @[])
-  # Find the record boundary whose byte position is closest to the midpoint.
-  let midByte = data.len div 2
-  var bestIdx = 0
-  var bestDist = abs(recEnds[0] - midByte)
-  for i in 1 ..< recEnds.len:
-    let dist = abs(recEnds[i] - midByte)
-    if dist < bestDist:
-      bestDist = dist
-      bestIdx = i
-  let splitAt = recEnds[bestIdx]
-  result = (true,
-            compressToBgzf(data[0 ..< splitAt]),
-            compressToBgzf(data[splitAt ..< data.len]))
-
 proc splitBgzfBlockAtUOffset*(path: string; offset: int64; uOff: int): (seq[byte], seq[byte]) =
   ## Decompress the BGZF block at file offset and split the uncompressed data at
   ## byte position uOff.  Returns (head, tail) where head = data[0 ..< uOff] and
@@ -417,45 +310,6 @@ proc bcfFirstDataVirtualOffset*(path: string): (int64, int) =
     quit(&"bcfFirstDataVirtualOffset: {path}: file too short to read BCF header", 1)
   quit(&"bcfFirstDataVirtualOffset: {path}: first record not found in file", 1)
 
-proc removeBcfHeaderBytes*(path: string): seq[byte] =
-  ## Scan BGZF blocks from the start of the BCF file, read l_text from the
-  ## BCF header, and return the bytes of the block that straddles the
-  ## header/data boundary starting from the first record, recompressed as BGZF.
-  ## Used for BCF shard 0: strips the in-block header prefix so only record
-  ## data is prepended ahead of the raw-copy region.
-  let starts = scanBgzfBlockStarts(path)
-  let f = open(path, fmRead)
-  defer: f.close()
-  var lText = -1'i64
-  var headerUncompSize = -1'i64
-  var cumUncomp = 0'i64
-  var headerBuf: seq[byte]
-  for off in starts:
-    var hdr = newSeq[byte](18)
-    f.setFilePos(off)
-    if readBytes(f, hdr, 0, 18) < 18: break
-    let blkSize = bgzfBlockSize(hdr)
-    if blkSize <= 0: break
-    var blk = newSeq[byte](blkSize)
-    f.setFilePos(off)
-    discard readBytes(f, blk, 0, blkSize)
-    let decompressed = decompressBgzf(blk)
-    let blockLen = decompressed.len.int64
-    if lText < 0:
-      headerBuf.add(decompressed)
-      if headerBuf.len >= 9:
-        if headerBuf[0] != byte('B') or headerBuf[1] != byte('C') or
-           headerBuf[2] != byte('F') or headerBuf[3] != 0x02'u8 or
-           headerBuf[4] != 0x02'u8:
-          quit(&"removeBcfHeaderBytes: {path}: not a BCF file", 1)
-        lText = leU32(headerBuf, 5).int64
-        headerUncompSize = 5'i64 + 4'i64 + lText
-    if headerUncompSize >= 0 and cumUncomp + blockLen > headerUncompSize:
-      let skipBytes = (headerUncompSize - cumUncomp).int
-      return compressToBgzfMulti(decompressed[skipBytes ..< decompressed.len])
-    cumUncomp += blockLen
-  result = compressToBgzfMulti(@[])
-
 proc decompressBgzfBytes*(data: openArray[byte]): seq[byte] =
   ## Decompress a sequence of concatenated BGZF blocks; return uncompressed bytes.
   ## Stops at the first invalid or incomplete block.
@@ -487,39 +341,6 @@ proc decompressCopyBytes*(srcPath: string; dst: File; start: int64; length: int6
     if decompressed.len > 0:
       discard dst.writeBytes(decompressed, 0, decompressed.len)
     cur += blkSize.int64
-
-proc removeHeaderLines*(path: string; offset: int64; size: int64): seq[byte] =
-  ## Read all BGZF blocks in [offset, offset+size) from path, decompress the
-  ## entire range (may span multiple blocks), strip every line starting with
-  ## '#', and recompress the remaining records as BGZF.
-  let f = open(path, fmRead)
-  f.setFilePos(offset)
-  var raw = newSeq[byte](size)
-  let nRead = readBytes(f, raw, 0, size.int)
-  f.close()
-  if nRead != size.int:
-    quit(&"removeHeaderLines: wanted {size} bytes at {offset} in {path}, got {nRead}", 1)
-  # Decompress every BGZF block in the range (header blocks + first data block).
-  var decompressed: seq[byte]
-  var pos = 0
-  while pos + 18 <= raw.len:
-    let blkSize = bgzfBlockSize(raw.toOpenArray(pos, raw.high))
-    if blkSize <= 0 or pos + blkSize > raw.len: break
-    decompressed.add(decompressBgzf(raw.toOpenArray(pos, pos + blkSize - 1)))
-    pos += blkSize
-  var records: seq[byte]
-  var lineStart = 0
-  for i in 0 ..< decompressed.len:
-    if decompressed[i] == byte('\n'):
-      let line = decompressed[lineStart .. i]
-      if line.len > 0 and line[0] != byte('#'):
-        records.add(line)
-      lineStart = i + 1
-  if lineStart < decompressed.len:
-    let partial = decompressed[lineStart .. ^1]
-    if partial.len > 0 and partial[0] != byte('#'):
-      records.add(partial)
-  result = compressToBgzfMulti(records)
 
 # ---------------------------------------------------------------------------
 # Format sniffing

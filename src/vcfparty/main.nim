@@ -41,22 +41,22 @@ proc scatterUsage() =
   stderr.writeLine "  -o, --output <str>        output file prefix (required)"
   stderr.writeLine "  -t, --max-threads <int>   max threads for scan/split/write (default: min(n-shards, 8))"
   stderr.writeLine "      --force-scan          always scan BGZF blocks (ignore index even if present)"
+  stderr.writeLine "      --clamp-shards        if -n exceeds available index entries, reduce -n instead of erroring"
   stderr.writeLine "  -v, --verbose             print progress info to stderr (block offsets, boundaries, shards)"
   stderr.writeLine "  -h, --help                show this help"
   quit(1)
 
+## Short flags that DO NOT take a value. parseopt uses this set to correctly
+## parse attached values like `-n50` (otherwise it splits into `-n`, `-5`, `-0`).
+const ShortNoVal = {'u', 'v', 'h'}
+
 proc nextVal(p: var OptParser; flag: string): string =
   ## Return the value for a flag, consuming the next argv token if the value
-  ## was not attached (i.e. '-n 4' rather than '-n=4').
-  ## Also handles the -j2 style: Nim's parseopt splits -j2 into two short
-  ## options (key=j, key=2); we recover the value when the second token is
-  ## all-digit and therefore cannot be a valid flag name.
+  ## was not attached (i.e. '-n 4' rather than '-n=4' or '-n4').
   if p.val != "":
     return p.val
   p.next()
   if p.kind == cmdArgument:
-    return p.key
-  if p.kind == cmdShortOption and p.key.allCharsInSet({'0'..'9'}):
     return p.key
   stderr.writeLine "error: -" & flag & " requires a value"
   quit(1)
@@ -70,7 +70,8 @@ proc runScatter(rawArgs: seq[string]) =
   var nThreads     = 0
   var nThreadsSet  = false
   var forceScan    = false
-  var p = initOptParser(rawArgs)
+  var clampShards  = false
+  var p = initOptParser(rawArgs, shortNoVal = ShortNoVal)
   while true:
     p.next()
     case p.kind
@@ -87,18 +88,6 @@ proc runScatter(rawArgs: seq[string]) =
         nShardsSet = true
       of "o", "output":
         outPrefix = nextVal(p, "o")
-      of "s", "sequential":
-        stderr.writeLine "error: -s/--sequential is no longer supported; scatter is always sequential"
-        quit(1)
-      of "i", "interleave":
-        stderr.writeLine "error: -i/--interleave is no longer supported; interleaving is chosen automatically by terminal operator"
-        quit(1)
-      of "d", "decompress":
-        stderr.writeLine "error: -d/--decompress is no longer supported; scatter always writes compressed output"
-        quit(1)
-      of "O", "output-type":
-        stderr.writeLine "error: -O/--output-type is no longer supported; output format is inferred from -o extension"
-        quit(1)
       of "t", "max-threads":
         let v = nextVal(p, "t")
         try:
@@ -112,6 +101,8 @@ proc runScatter(rawArgs: seq[string]) =
         nThreadsSet = true
       of "force-scan":
         forceScan = true
+      of "clamp-shards":
+        clampShards = true
       of "v", "verbose":
         scatter.verbose = true
       of "h", "help":
@@ -146,7 +137,7 @@ proc runScatter(rawArgs: seq[string]) =
   if not nThreadsSet:
     nThreads = min(nShards, 8)
   warnFormatMismatch(inputFile, outPrefix)
-  scatter(inputFile, nShards, outPrefix, nThreads, forceScan, fmt)
+  scatter(inputFile, nShards, outPrefix, nThreads, forceScan, fmt, clampShards)
 
 proc runUsage() =
   ## Print run subcommand usage to stderr and exit 1.
@@ -158,6 +149,7 @@ proc runUsage() =
   stderr.writeLine "  -u                           force uncompressed file output (error with tool-managed {})"
   stderr.writeLine "  -t, --max-threads <int>      max threads for scatter/validation (default: min(n-shards, 8))"
   stderr.writeLine "      --force-scan             always scan BGZF blocks (ignore index even if present)"
+  stderr.writeLine "      --clamp-shards           if -n exceeds available index entries, reduce -n instead of erroring"
   stderr.writeLine "      --no-kill                on failure, let sibling shards finish (default: kill them)"
   stderr.writeLine "      --header-pattern <pat>   strip lines starting with pat from shards 2..N (text format only)"
   stderr.writeLine "      --header-n <n>           strip the first n lines from shards 2..N (text format only)"
@@ -195,13 +187,14 @@ proc runRun(rawArgs: seq[string]) =
   var nThreads        = 0
   var nThreadsSet     = false
   var forceScan       = false
+  var clampShards     = false
   var forceUncompress = false
   var noKill          = false
   var headerPattern   = ""
   var headerPatternSet = false
   var headerN         = 0
   var headerNSet      = false
-  var p = initOptParser(vcfpartyPart)
+  var p = initOptParser(vcfpartyPart, shortNoVal = ShortNoVal)
   while true:
     p.next()
     case p.kind
@@ -220,24 +213,6 @@ proc runRun(rawArgs: seq[string]) =
         outPrefix = nextVal(p, "o")
       of "u":
         forceUncompress = true
-      of "s", "sequential":
-        stderr.writeLine "error: -s/--sequential is no longer supported; scatter is always sequential"
-        quit(1)
-      of "i", "interleave":
-        stderr.writeLine "error: -i/--interleave is no longer supported; interleaving is chosen automatically by terminal operator"
-        quit(1)
-      of "d", "decompress":
-        stderr.writeLine "error: -d/--decompress is no longer supported; pipes always decompress"
-        quit(1)
-      of "I", "input-uncompress":
-        stderr.writeLine "error: -I/--input-uncompress is no longer supported; pipes always decompress"
-        quit(1)
-      of "P", "pipe-type":
-        stderr.writeLine "error: -P/--pipe-type is no longer supported; pipes always decompress"
-        quit(1)
-      of "O", "output-type":
-        stderr.writeLine "error: -O/--output-type is no longer supported; output format is inferred from -o extension"
-        quit(1)
       of "t", "max-threads":
         let v = nextVal(p, "t")
         try:
@@ -251,6 +226,8 @@ proc runRun(rawArgs: seq[string]) =
         nThreadsSet = true
       of "force-scan":
         forceScan = true
+      of "clamp-shards":
+        clampShards = true
       of "no-kill":
         noKill = true
       of "header-pattern":
@@ -267,9 +244,6 @@ proc runRun(rawArgs: seq[string]) =
           stderr.writeLine "error: --header-n must be >= 0, got: " & $headerN
           quit(1)
         headerNSet = true
-      of "tmp-dir":
-        stderr.writeLine "error: --tmp-dir is no longer supported; temp directory is created automatically"
-        quit(1)
       of "v", "verbose":
         scatter.verbose = true
       of "h", "help":
@@ -329,19 +303,19 @@ proc runRun(rawArgs: seq[string]) =
     if not isStdout:
       warnFormatMismatch(inputFile, outPrefix)
     runShardsGather(inputFile, nShards, outPrefix, nThreads, forceScan,
-                    stages, noKill, cfg)
+                    stages, noKill, cfg, clampShards)
   of topCollect:
     let isStdout = (outPrefix == "" or outPrefix == "/dev/stdout")
     if not isStdout:
       warnFormatMismatch(inputFile, outPrefix)
     runShardsCollect(inputFile, nShards, outPrefix, nThreads, forceScan,
-                     stages, noKill, isStdout)
+                     stages, noKill, isStdout, clampShards)
   of topMerge:
     let isStdout = (outPrefix == "" or outPrefix == "/dev/stdout")
     if not isStdout:
       warnFormatMismatch(inputFile, outPrefix)
     runShardsMerge(inputFile, nShards, outPrefix, nThreads, forceScan,
-                   stages, noKill, isStdout)
+                   stages, noKill, isStdout, clampShards)
   of topNone:
     let mode = inferRunMode(outPrefix != "", hasBrace)
     case mode
@@ -350,11 +324,11 @@ proc runRun(rawArgs: seq[string]) =
         stderr.writeLine "error: -u cannot be used with tool-managed output ({}); vcfparty does not control that output"
         quit(1)
       runShards(inputFile, nShards, outPrefix, nThreads, forceScan,
-                stages, noKill, toolManaged = true)
+                stages, noKill, toolManaged = true, clampShards = clampShards)
     of rmNormal:
       warnFormatMismatch(inputFile, outPrefix)
       runShards(inputFile, nShards, outPrefix, nThreads, forceScan,
-                stages, noKill)
+                stages, noKill, clampShards = clampShards)
 
 proc gatherUsage() =
   ## Print gather subcommand usage to stderr and exit 1.
@@ -376,7 +350,7 @@ proc runGather(rawArgs: seq[string]) =
   var headerN              = 0
   var headerNSet           = false
   var inputFiles: seq[string]
-  var p = initOptParser(rawArgs)
+  var p = initOptParser(rawArgs, shortNoVal = ShortNoVal)
   while true:
     p.next()
     case p.kind
@@ -385,15 +359,6 @@ proc runGather(rawArgs: seq[string]) =
       case p.key
       of "o", "output":
         outPath = nextVal(p, "o")
-      of "concat":
-        stderr.writeLine "error: --concat is no longer supported; gather always concatenates"
-        quit(1)
-      of "merge":
-        stderr.writeLine "error: --merge is no longer supported; use 'vcfparty run ... +merge+' instead"
-        quit(1)
-      of "O", "output-type":
-        stderr.writeLine "error: -O/--output-type is no longer supported; output format is inferred from -o extension"
-        quit(1)
       of "header-pattern":
         headerPattern    = nextVal(p, "header-pattern")
         headerPatternSet = true

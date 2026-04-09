@@ -234,7 +234,7 @@ proc waitOne(running: var seq[InFlight]; failed: var bool) =
 proc runShards*(vcfPath: string; nShards: int; outputTemplate: string;
                 nThreads: int; forceScan: bool;
                 stages: seq[seq[string]]; noKill: bool = false;
-                toolManaged: bool = false) =
+                toolManaged: bool = false; clampShards: bool = false) =
   ## Scatter vcfPath into nShards shards and pipe each through the tool pipeline.
   ## outputTemplate may contain {} or use shard_NN. prefix naming.
   ## All N shards run concurrently. On failure, siblings are killed (SIGTERM)
@@ -245,7 +245,9 @@ proc runShards*(vcfPath: string; nShards: int; outputTemplate: string;
   let actualThreads = if nThreads == 0: countProcessors() else: nThreads
   setMaxPoolSize(nShards * 2)
   let fmt      = if vcfPath.endsWith(".bcf"): ffBcf else: ffVcf
-  let tasks    = computeShards(vcfPath, nShards, actualThreads, forceScan, fmt)
+  let tasks    = computeShards(vcfPath, nShards, actualThreads, forceScan, fmt,
+                               clampShards)
+  let nShards  = tasks.len  # may be < requested nShards if clamped
   var anyFailed = false
   var inFlight: seq[InFlight]
   for i in 0 ..< nShards:
@@ -302,7 +304,8 @@ proc runShards*(vcfPath: string; nShards: int; outputTemplate: string;
 
 proc runShardsGather*(vcfPath: string; nShards: int; outputTemplate: string;
                       nThreads: int; forceScan: bool;
-                      stages: seq[seq[string]]; noKill: bool; cfg: GatherConfig) =
+                      stages: seq[seq[string]]; noKill: bool; cfg: GatherConfig;
+                      clampShards: bool = false) =
   ## Scatter vcfPath into nShards shards, pipe each through the tool pipeline,
   ## capture stdout via interceptor threads, then concatenate into cfg.outputPath.
   ## {} in stage tokens is substituted with the zero-padded shard number.
@@ -311,7 +314,9 @@ proc runShardsGather*(vcfPath: string; nShards: int; outputTemplate: string;
   # Pool must accommodate scatter writer threads and interceptor threads simultaneously.
   setMaxPoolSize(nShards * 2)
   let fmt   = if vcfPath.endsWith(".bcf"): ffBcf else: ffVcf
-  let tasks = computeShards(vcfPath, nShards, actualThreads, forceScan, fmt)
+  let tasks = computeShards(vcfPath, nShards, actualThreads, forceScan, fmt,
+                            clampShards)
+  let nShards = tasks.len  # may be < requested nShards if clamped
   createDir(cfg.tmpDir)
   var anyFailed = false
   var inFlight:    seq[InFlight]
@@ -486,7 +491,8 @@ proc doCollectInterceptor*(shardIdx: int; inputFd: cint; outFd: cint): int {.gcs
 
 proc runShardsCollect*(vcfPath: string; nShards: int; outputPath: string;
                        nThreads: int; forceScan: bool;
-                       stages: seq[seq[string]]; noKill: bool; toStdout: bool) =
+                       stages: seq[seq[string]]; noKill: bool; toStdout: bool;
+                       clampShards: bool = false) =
   ## +collect+: scatter into N shards, pipe each through the pipeline,
   ## stream complete records to outputPath (or stdout) in arrival order.
   ## No temp files. No ordering guarantee.
@@ -494,7 +500,9 @@ proc runShardsCollect*(vcfPath: string; nShards: int; outputPath: string;
   # Pool must accommodate scatter writer threads and interceptor threads.
   setMaxPoolSize(nShards * 2)
   let fmt   = if vcfPath.endsWith(".bcf"): ffBcf else: ffVcf
-  let tasks = computeShards(vcfPath, nShards, actualThreads, forceScan, fmt)
+  let tasks = computeShards(vcfPath, nShards, actualThreads, forceScan, fmt,
+                            clampShards)
+  let nShards = tasks.len  # may be < requested nShards if clamped
 
   # Reset format-detection globals (shared with gather).
   gChromLine.ready = false
@@ -647,7 +655,8 @@ proc doMergeFeeder(shardIdx: int; srcFd: cint; relayWriteFd: cint): int {.gcsafe
 
 proc runShardsMerge*(vcfPath: string; nShards: int; outputPath: string;
                      nThreads: int; forceScan: bool;
-                     stages: seq[seq[string]]; noKill: bool; toStdout: bool) =
+                     stages: seq[seq[string]]; noKill: bool; toStdout: bool;
+                     clampShards: bool = false) =
   ## +merge+: scatter vcfPath into nShards shards, pipe each through the pipeline,
   ## strip headers, k-way merge records to outputPath (or stdout) in genomic order.
   ## Uses interleaved scatter: blocks assigned round-robin so all shards receive
@@ -706,6 +715,20 @@ proc runShardsMerge*(vcfPath: string; nShards: int; outputPath: string;
   # Compute sizes; exclude the 28-byte BGZF EOF block from the last entry.
   var sizes = getLengths(starts, fileSize - 28)
   let nDataBlocks = starts.len
+  # If nShards > nDataBlocks each chunk would have less than one entry: clamp
+  # down (clampShards) or reject.
+  var nShards = nShards  # shadow parameter; may be reduced if clamping
+  if nShards > nDataBlocks:
+    if clampShards:
+      stderr.writeLine &"info: --clamp-shards: reducing -n from {nShards} to {nDataBlocks} ({nDataBlocks} index entries available in {vcfPath})"
+      nShards = nDataBlocks
+    else:
+      stderr.writeLine &"error: requested {nShards} shards but only {nDataBlocks} index entries available in {vcfPath}"
+      if fmt == ffVcf and not forceScan:
+        stderr.writeLine &"  reduce -n to at most {nDataBlocks}, use --force-scan to scan all BGZF blocks, or pass --clamp-shards to reduce -n automatically"
+      else:
+        stderr.writeLine &"  reduce -n to at most {nDataBlocks} or pass --clamp-shards to reduce -n automatically"
+      quit(1)
   let chunkSize = max(1, (nDataBlocks + nShards * 10 - 1) div (nShards * 10))
   let assignment = interleavedBlockAssignment(nDataBlocks, nShards, chunkSize)
 

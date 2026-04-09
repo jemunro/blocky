@@ -22,58 +22,56 @@ proc readMagic(path: string; offset: int64): array[3, byte] =
   discard readBytes(f, result, 0, 3)
 
 # ===========================================================================
-# SC1–SC4 — Index parsing: TBI and CSI
+# SC1 — Index parsing: TBI and CSI virtual offsets
 # ===========================================================================
 
 # ---------------------------------------------------------------------------
-# SC1 — testParseTbi: offsets non-empty, strictly increasing, valid BGZF magic
+# SC1.1 — parseTbiVirtualOffsets: voffs non-empty, sorted, block_off has BGZF magic
 # ---------------------------------------------------------------------------
-block testParseTbi:
-  let starts = parseTbiBlockStarts(SmallVcf & ".tbi")
-  doAssert starts.len > 0, "parseTbiBlockStarts: no blocks"
-  for i in 1 ..< starts.len:
-    doAssert starts[i] > starts[i-1], "parseTbiBlockStarts: not strictly increasing"
-  for off in starts:
-    let magic = readMagic(SmallVcf, off)
+block testParseTbiVirtualOffsets:
+  let voffs = parseTbiVirtualOffsets(SmallVcf & ".tbi")
+  doAssert voffs.len > 0, "parseTbiVirtualOffsets: no entries"
+  for i in 1 ..< voffs.len:
+    doAssert (voffs[i][0], voffs[i][1]) >= (voffs[i-1][0], voffs[i-1][1]),
+      "parseTbiVirtualOffsets: not sorted"
+  for v in voffs:
+    let magic = readMagic(SmallVcf, v[0])
     doAssert magic[0] == 0x1f and magic[1] == 0x8b,
-      &"bad BGZF magic at offset {off}"
-  echo &"PASS SC1.1 parseTbiBlockStarts: {starts.len} blocks"
+      &"bad BGZF magic at offset {v[0]}"
+  echo &"PASS SC1.1 parseTbiVirtualOffsets: {voffs.len} virtual offsets"
 
 # ---------------------------------------------------------------------------
-# SC2 — testReadIndexBlockStartsTbi: readIndexBlockStarts falls back to TBI
+# SC1.2 — readIndexVirtualOffsets falls back to TBI when no .csi present
 # ---------------------------------------------------------------------------
-block testReadIndexBlockStartsTbi:
-  let starts = readIndexBlockStarts(SmallVcf)
-  doAssert starts.len > 0, "readIndexBlockStarts (TBI): no blocks"
-  for i in 1 ..< starts.len:
-    doAssert starts[i] > starts[i-1], "readIndexBlockStarts (TBI): not sorted"
-  echo &"PASS SC1.2 readIndexBlockStarts via TBI: {starts.len} blocks"
+block testReadIndexVirtualOffsetsTbi:
+  let voffs = readIndexVirtualOffsets(SmallVcf)
+  doAssert voffs.len > 0, "readIndexVirtualOffsets (TBI): no entries"
+  echo &"PASS SC1.2 readIndexVirtualOffsets via TBI: {voffs.len} entries"
 
 # ---------------------------------------------------------------------------
-# SC3 — testParseCsi: CSI-only fixture; offsets valid and strictly increasing
+# SC1.3 — parseCsiVirtualOffsets: CSI-only fixture
 # ---------------------------------------------------------------------------
-block testParseCsi:
+block testParseCsiVirtualOffsets:
   doAssert fileExists(CsiVcf & ".csi"), "CSI fixture missing — run generate_fixtures.sh"
   doAssert not fileExists(CsiVcf & ".tbi"), "CSI fixture must not have a .tbi alongside it"
-  let starts = parseCsiBlockStarts(CsiVcf & ".csi")
-  doAssert starts.len > 0, "parseCsiBlockStarts: no blocks"
-  for i in 1 ..< starts.len:
-    doAssert starts[i] > starts[i-1], "parseCsiBlockStarts: not strictly increasing"
-  for off in starts:
-    let magic = readMagic(CsiVcf, off)
+  let voffs = parseCsiVirtualOffsets(CsiVcf & ".csi")
+  doAssert voffs.len > 0, "parseCsiVirtualOffsets: no entries"
+  for i in 1 ..< voffs.len:
+    doAssert (voffs[i][0], voffs[i][1]) >= (voffs[i-1][0], voffs[i-1][1]),
+      "parseCsiVirtualOffsets: not sorted"
+  for v in voffs:
+    let magic = readMagic(CsiVcf, v[0])
     doAssert magic[0] == 0x1f and magic[1] == 0x8b,
-      &"bad BGZF magic at offset {off}"
-  echo &"PASS SC1.3 parseCsiBlockStarts: {starts.len} blocks"
+      &"bad BGZF magic at offset {v[0]}"
+  echo &"PASS SC1.3 parseCsiVirtualOffsets: {voffs.len} virtual offsets"
 
 # ---------------------------------------------------------------------------
-# SC4 — testReadIndexBlockStartsCsi: readIndexBlockStarts falls through to CSI
+# SC1.4 — readIndexVirtualOffsets falls through to CSI when no .tbi present
 # ---------------------------------------------------------------------------
-block testReadIndexBlockStartsCsi:
-  let starts = readIndexBlockStarts(CsiVcf)   # must fall through to .csi
-  doAssert starts.len > 0, "readIndexBlockStarts (CSI): no blocks"
-  for i in 1 ..< starts.len:
-    doAssert starts[i] > starts[i-1], "readIndexBlockStarts (CSI): not sorted"
-  echo &"PASS SC1.4 readIndexBlockStarts via CSI: {starts.len} blocks"
+block testReadIndexVirtualOffsetsCsi:
+  let voffs = readIndexVirtualOffsets(CsiVcf)
+  doAssert voffs.len > 0, "readIndexVirtualOffsets (CSI): no entries"
+  echo &"PASS SC1.4 readIndexVirtualOffsets via CSI: {voffs.len} entries"
 
 # ===========================================================================
 # SC5–SC10 — Boundary computation: header extraction, lengths, partition, validation
@@ -108,74 +106,10 @@ block testGetLengths:
     &"getLengths: expected [100,200,400,300] got {lengths}"
   echo "PASS SC2.2 getLengths"
 
-# ---------------------------------------------------------------------------
-# SC7 — testPartitionBoundaries2: 4 equal blocks → 2 shards → 1 boundary at index 1
-# ---------------------------------------------------------------------------
-block testPartitionBoundaries2:
-  # 4 equal blocks → split into 2 shards → boundary at index 1 (bisect_left on cumsum)
-  let lengths: seq[int64] = @[100'i64, 100, 100, 100]
-  let bounds = partitionBoundaries(lengths, 2)
-  doAssert bounds.len == 1, &"partitionBoundaries 2: expected 1 bound, got {bounds.len}"
-  doAssert bounds[0] == 1, &"partitionBoundaries 2: expected index 1, got {bounds[0]}"
-  echo "PASS SC3.1 partitionBoundaries: 2 shards"
-
-# ---------------------------------------------------------------------------
-# SC8 — testPartitionBoundaries4: 8 equal blocks → 4 shards → boundaries [1,3,5]
-# ---------------------------------------------------------------------------
-block testPartitionBoundaries4:
-  # 8 equal blocks → 4 shards → boundaries at 1, 3, 5 (bisect_left on cumsum)
-  let lengths: seq[int64] = @[100'i64, 100, 100, 100, 100, 100, 100, 100]
-  let bounds = partitionBoundaries(lengths, 4)
-  doAssert bounds.len == 3, &"partitionBoundaries 4: expected 3 bounds, got {bounds.len}"
-  doAssert bounds == @[1, 3, 5], &"partitionBoundaries 4: expected [1,3,5] got {bounds}"
-  echo "PASS SC3.2 partitionBoundaries: 4 shards"
-
-# ---------------------------------------------------------------------------
-# SC9 — testIsValidBoundary: every non-EOF data block in small.vcf.gz is a valid boundary
-# ---------------------------------------------------------------------------
-block testIsValidBoundary:
-  # Every non-EOF data block in small.vcf.gz should be valid (contains >= 2 lines).
-  let allStarts = scanBgzfBlockStarts(SmallVcf)
-  var validCount = 0
-  var buf = newSeq[byte](18)
-  let f = open(SmallVcf, fmRead)
-  for off in allStarts:
-    f.setFilePos(off)
-    discard readBytes(f, buf, 0, 18)
-    let sz = bgzfBlockSize(buf)
-    if sz == 28: continue   # skip EOF block
-    let fileSize = getFileSize(SmallVcf)
-    let blockLen = if off + sz.int64 < fileSize: sz.int64
-                   else: fileSize - off
-    if isValidBoundary(SmallVcf, off, blockLen):
-      validCount += 1
-  f.close()
-  doAssert validCount > 0, "isValidBoundary: no valid blocks found"
-  echo &"PASS SC3.3 isValidBoundary: {validCount} valid blocks"
-
-# ---------------------------------------------------------------------------
-# SC10 — testOptimiseBoundaries4: 4 shards; all boundaries valid; all lengths > 0
-# ---------------------------------------------------------------------------
-block testOptimiseBoundaries4:
-  var starts = readIndexBlockStarts(SmallVcf)
-  let (_, firstBlock) = getHeaderAndFirstBlock(SmallVcf)
-  # Mirror Python: add first_block and scan fine-grained sub-blocks.
-  if firstBlock notin starts: starts.add(firstBlock)
-  starts.sort()
-  if starts.len >= 2:
-    for off in scanBgzfBlockStarts(SmallVcf, starts[0], starts[1]):
-      if off notin starts: starts.add(off)
-    starts.sort()
-  let (bounds, finalStarts, lengths) = optimiseBoundaries(SmallVcf, starts, 4)
-  doAssert bounds.len == 3, &"optimiseBoundaries: expected 3 bounds, got {bounds.len}"
-  # Each boundary block must be valid
-  for bi in bounds:
-    doAssert isValidBoundary(SmallVcf, finalStarts[bi], lengths[bi]),
-      &"optimiseBoundaries: boundary at {finalStarts[bi]} is invalid"
-  # Lengths must be non-zero
-  for l in lengths:
-    doAssert l > 0, "optimiseBoundaries: zero-length block"
-  echo &"PASS SC3.4 optimiseBoundaries: 4-shard, {finalStarts.len} fine blocks"
+# SC3.1-SC3.4 (partitionBoundaries, isValidBoundary, optimiseBoundaries) removed:
+# these procs no longer exist after Milestone V — scatter now uses index virtual
+# offsets directly, eliminating boundary search. End-to-end scatter correctness
+# is covered by SC11+ (checkShards) and CL10+ in test_cli.nim.
 
 # ===========================================================================
 # SC11–SC15 — VCF scatter end-to-end (TBI, CSI, --force-scan)

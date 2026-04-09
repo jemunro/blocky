@@ -6,7 +6,7 @@
 ##   3. Optimise shard boundaries using weighted bisection + block validation.
 ##   4. Write shards: header + raw middle blocks + recompressed boundary blocks + EOF.
 
-import std/[algorithm, atomics, cpuinfo, os, posix, sequtils, sets, strformat, strutils]
+import std/[algorithm, atomics, cpuinfo, os, posix, sequtils, strformat, strutils]
 {.warning[Deprecated]: off.}
 import std/threadpool
 {.warning[Deprecated]: on.}
@@ -62,34 +62,6 @@ proc readLeU64(data: openArray[byte]; pos: var int): uint64 =
 # ---------------------------------------------------------------------------
 # Index parsing — TBI
 # ---------------------------------------------------------------------------
-
-proc parseTbiBlockStarts*(tbiPath: string): seq[int64] =
-  ## Parse a .tbi tabix index and return sorted unique BGZF file offsets
-  ## (chunk-begin virtual offsets >> 16) of all indexed blocks.
-  let raw = decompressBgzfFile(tbiPath)
-  if raw.len < 8 or raw[0] != byte('T') or raw[1] != byte('B') or
-     raw[2] != byte('I') or raw[3] != 0x01:
-    quit(&"parseTbiBlockStarts: not a valid TBI index: {tbiPath}", 1)
-  var pos = 4
-  let nRef = readLeI32(raw, pos).int  # pos → 8
-  pos += 24                            # skip 6 int32s (format/cols/meta/skip)
-  let lNm = readLeI32(raw, pos).int   # pos → 36
-  pos += lNm                          # skip sequence-name block
-  var starts: seq[int64]
-  for _ in 0 ..< nRef:
-    let nBin = readLeU32(raw, pos).int
-    for _ in 0 ..< nBin:
-      pos += 4  # skip bin_id (uint32)
-      let nChunk = readLeU32(raw, pos).int
-      for _ in 0 ..< nChunk:
-        let beg    = readLeU64(raw, pos)
-        let endOff = readLeU64(raw, pos)
-        if endOff > beg:
-          starts.add((beg shr 16).int64)
-    let nIntv = readLeU32(raw, pos).int
-    pos += 8 * nIntv  # skip linear index intervals
-  starts.sort()
-  result = starts.deduplicate(isSorted = true)
 
 proc parseTbiVirtualOffsets*(tbiPath: string): seq[(int64, int)] =
   ## Parse a .tbi index and return sorted unique virtual offsets as
@@ -160,50 +132,9 @@ proc parseCsiVirtualOffsets*(csiPath: string): seq[(int64, int)] =
       deduped.add(v)
   result = deduped
 
-proc parseCsiBlockStarts*(csiPath: string): seq[int64] =
-  ## Parse a .csi index and return sorted unique BGZF file offsets.
-  let raw = decompressBgzfFile(csiPath)
-  if raw.len < 8 or raw[0] != byte('C') or raw[1] != byte('S') or
-     raw[2] != byte('I') or raw[3] != 0x01:
-    quit(&"parseCsiBlockStarts: not a valid CSI index: {csiPath}", 1)
-  var pos = 4
-  pos += 8               # skip min_shift (int32) + depth (int32)
-  let lAux = readLeI32(raw, pos).int
-  pos += lAux            # skip aux data
-  let nRef = readLeI32(raw, pos).int
-  var starts: seq[int64]
-  for _ in 0 ..< nRef:
-    let nBin = readLeI32(raw, pos).int
-    for _ in 0 ..< nBin:
-      pos += 4   # skip bin (uint32)
-      pos += 8   # skip loffset (uint64)
-      let nChunk = readLeI32(raw, pos).int
-      for _ in 0 ..< nChunk:
-        let beg    = readLeU64(raw, pos)
-        let endOff = readLeU64(raw, pos)
-        if endOff > beg:
-          starts.add((beg shr 16).int64)
-  starts.sort()
-  result = starts.deduplicate(isSorted = true)
-
 # ---------------------------------------------------------------------------
-# Public entry point — detect index type and parse
+# Public entry point — detect index type and parse virtual offsets
 # ---------------------------------------------------------------------------
-
-proc readIndexBlockStarts*(vcfPath: string): seq[int64] =
-  ## Detect a .tbi or .csi index alongside vcfPath and return sorted unique
-  ## BGZF file offsets. Aborts with an error message if no index is found.
-  let tbi = vcfPath & ".tbi"
-  let csi = vcfPath & ".csi"
-  if fileExists(csi):
-    result = parseCsiBlockStarts(csi)
-    info(&"csi: read {result.len} block offsets from {csi}")
-  elif fileExists(tbi):
-    result = parseTbiBlockStarts(tbi)
-    info(&"tbi: read {result.len} block offsets from {tbi}")
-  else:
-    stderr.writeLine &"error: no index found for {vcfPath} (expected {tbi} or {csi})"
-    quit(1)
 
 proc readIndexVirtualOffsets*(vcfPath: string): seq[(int64, int)] =
   ## Detect a .csi or .tbi index and return sorted unique virtual offsets as
@@ -362,130 +293,9 @@ proc getLengths*(starts: seq[int64]; fileSize: int64): seq[int64] =
   if starts.len > 0:
     result[^1] = fileSize - starts[^1]
 
-proc partitionBoundaries*(lengths: seq[int64]; n: int): seq[int] =
-  ## Return n-1 block indices that best partition lengths into n equal-size parts.
-  ## Mirrors Python's bisect_left on cumulative sums.
-  ## Calls quit(1) if there are fewer blocks than n-1.
-  if lengths.len < n - 1:
-    let need = n - 1
-    stderr.writeLine &"error: only {lengths.len} BGZF blocks but need at least" &
-      &" {need} to create {n} shards"
-    quit(1)
-  var cum = newSeq[int64](lengths.len)
-  cum[0] = lengths[0]
-  for i in 1 ..< lengths.len:
-    cum[i] = cum[i - 1] + lengths[i]
-  let total = cum[^1]
-  result = newSeq[int](n - 1)
-  for i in 0 ..< n - 1:
-    let target = (int64(i + 1) * total) div n
-    result[i] = lowerBound(cum, target)
-
-proc isValidBoundary*(vcfPath: string; start: int64; length: int64): bool =
-  ## Return true if the BGZF block at start contains at least two complete
-  ## lines — i.e., there is a '\n' that is not the last byte.
-  ## This mirrors Python's is_valid_boundary check.
-  let f = open(vcfPath, fmRead)
-  f.setFilePos(start)
-  var raw = newSeq[byte](length)
-  let nRead = readBytes(f, raw, 0, length.int)
-  f.close()
-  if nRead < length.int: return false
-  let content = decompressBgzf(raw)
-  for i in 0 ..< content.len - 1:
-    if content[i] == byte('\n'):
-      return true   # '\n' found that is not the last byte
-  return false
-
-proc isValidBcfBoundary(bcfPath: string; start: int64; length: int64): bool =
-  ## Return true if the BGZF block at start contains at least two complete
-  ## BCF records — i.e., it can be split at a record boundary.
-  let (valid, _, _) = splitBcfBoundaryBlock(bcfPath, start, length)
-  result = valid
-
-proc optimiseBoundaries*(vcfPath: string; startsIn: seq[int64]; nShards: int;
-                          nThreads: int = 1;
-                          format: FileFormat = ffVcf): (seq[int], seq[int64], seq[int64]) =
-  ## Find shard boundary block indices that produce roughly equal-size parts.
-  ## Single-pass algorithm:
-  ##   1. Compute initial partition from coarse block starts.
-  ##   2. Scan each boundary block range for finer BGZF sub-blocks (one pass).
-  ##   3. Repartition once with the enriched block list.
-  ##   4. Validate; fix any invalid boundary by finding the nearest valid neighbour.
-  let fileSize = getFileSize(vcfPath)
-  var lengths  = getLengths(startsIn, fileSize)
-  var bounds   = partitionBoundaries(lengths, nShards)
-  info(&"optimise: {startsIn.len} coarse blocks, initial boundary indices: {bounds}")
-
-  # Scan each boundary block range once for fine-grained sub-blocks.
-  var allStarts = startsIn
-  var seen = allStarts.toHashSet   # O(1) duplicate check replaces O(n) `notin seq`
-  if nThreads > 1:
-    var scanFVs: seq[FlowVar[seq[int64]]]
-    for bi in bounds:
-      let s = startsIn[bi]; let l = lengths[bi]
-      scanFVs.add(spawn scanBgzfBlockStarts(vcfPath, s, s + l))
-    for fv in scanFVs:
-      for off in ^fv:
-        if off notin seen:
-          seen.incl(off)
-          allStarts.add(off)
-  else:
-    for bi in bounds:
-      let s = startsIn[bi]; let l = lengths[bi]
-      for off in scanBgzfBlockStarts(vcfPath, s, s + l):
-        if off notin seen:
-          seen.incl(off)
-          allStarts.add(off)
-
-  allStarts.sort()
-  allStarts = allStarts.deduplicate(isSorted = true)
-  lengths = getLengths(allStarts, fileSize)
-  bounds  = partitionBoundaries(lengths, nShards)
-  info(&"optimise: {allStarts.len} fine blocks after scan, " &
-       &"boundary offsets: {bounds.mapIt(allStarts[it])}")
-
-  # Validate boundaries; fix any invalid one by scanning neighbours.
-  for i in 0 ..< bounds.len:
-    let isValid = proc(bi: int): bool =
-      if format == ffBcf: isValidBcfBoundary(vcfPath, allStarts[bi], lengths[bi])
-      else:             isValidBoundary(vcfPath, allStarts[bi], lengths[bi])
-    if not isValid(bounds[i]):
-      var fixed = false
-      for delta in 1 ..< allStarts.len:
-        for candidate in [bounds[i] + delta, bounds[i] - delta]:
-          if candidate >= 0 and candidate < allStarts.len and isValid(candidate):
-            bounds[i] = candidate
-            fixed = true
-            break
-        if fixed: break
-      if not fixed:
-        stderr.writeLine "error: could not find valid boundary near shard " &
-          $(i + 1) & "; try fewer shards"
-        quit(1)
-
-  info(&"optimise: done (single pass)")
-  result = (bounds, allStarts, lengths)
-
 # ---------------------------------------------------------------------------
 # Phase 4 — shard writing helpers
 # ---------------------------------------------------------------------------
-
-type SplitPair = object
-  ## Value-type wrapper for the (head, tail) pair returned by splitChunk.
-  ## Using an object (not a tuple) keeps FlowVar transfer across threads clean.
-  head: seq[byte]
-  tail: seq[byte]
-
-proc splitChunkPair(vcfPath: string; offset: int64; size: int64): SplitPair {.gcsafe.} =
-  ## Thin gcsafe wrapper around splitChunk for use with spawn.
-  let (h, t) = splitChunk(vcfPath, offset, size)
-  SplitPair(head: h, tail: t)
-
-proc splitBcfChunkPair(bcfPath: string; offset: int64; size: int64): SplitPair {.gcsafe.} =
-  ## Thin gcsafe wrapper around splitBcfBoundaryBlock for use with spawn.
-  let (_, h, t) = splitBcfBoundaryBlock(bcfPath, offset, size)
-  SplitPair(head: h, tail: t)
 
 type ShardTask* = object
   ## All data needed to write one output shard.  Passed by value to worker
@@ -542,168 +352,136 @@ proc doWriteShard*(task: ShardTask): int {.gcsafe.} =
 
 proc computeShards*(vcfPath: string; nShards: int; nThreads: int = 1;
                     forceScan: bool = false;
-                    format: FileFormat = ffVcf): seq[ShardTask] =
+                    format: FileFormat = ffVcf;
+                    clampShards: bool = false): seq[ShardTask] =
   ## Compute per-shard byte ranges and prepend buffers for vcfPath.
   ## Returns nShards ShardTask objects with outFd = -1 and logLine = "".
   ## Caller must set task.outFd before calling doWriteShard.
-  ## nThreads controls threadpool parallelism for scanning and boundary splits.
+  ##
+  ## Unified virtual-offset approach for both BCF and VCF:
+  ##   1. Get header bytes and the first data virtual offset.
+  ##   2. Read index virtual offsets (CSI or TBI). If no index (VCF only),
+  ##      fall back to scanning all BGZF block starts and treating each as
+  ##      (block_off, 0).
+  ##   3. Select nShards-1 boundary virtual offsets evenly spaced by index.
+  ##   4. For each boundary with u_off > 0, split the block at u_off using
+  ##      `splitBgzfBlockAtUOffset` (no decompression search needed).
   let fileSize = getFileSize(vcfPath)
 
   var headerBytes: seq[byte]
-  var firstBlock: int64
-  var starts: seq[int64]
+  var firstBlockOff: int64
+  var firstUOff: int
 
   if format == ffBcf:
-    # BCF: CSI index required; no TBI fallback; no auto-scan.
-    # Use full CSI virtual offsets (block_off, u_off) for record-exact splitting.
+    # BCF: CSI index required; no auto-scan fallback.
     let csi = vcfPath & ".csi"
     if not fileExists(csi):
       stderr.writeLine &"error: BCF input requires a CSI index: {csi} not found"
       stderr.writeLine &"  (create one with 'bcftools index {vcfPath}')"
       quit(1)
     headerBytes = extractBcfHeader(vcfPath)
-    let (firstBlockOff, firstUOff) = bcfFirstDataVirtualOffset(vcfPath)
-    var voffs = parseCsiVirtualOffsets(csi)
-    let firstVO = (firstBlockOff, firstUOff)
-    if firstVO notin voffs: voffs.add(firstVO)
-    voffs.sort(proc(a, b: (int64, int)): int =
-      if a[0] != b[0]: cmp(a[0], b[0]) else: cmp(a[1], b[1]))
-    var deduped: seq[(int64, int)]
-    for i, v in voffs:
-      if i == 0 or v != voffs[i - 1]: deduped.add(v)
-    voffs = deduped
-    info(&"bcf: {voffs.len} virtual offsets, firstData=({firstBlockOff},{firstUOff})")
-
-    # Select nShards-1 boundary virtual offsets, evenly spaced by index.
-    var boundaryVoffs: seq[(int64, int)]
-    for i in 1 ..< nShards:
-      let idx = (i * voffs.len) div nShards
-      boundaryVoffs.add(voffs[idx])
-
-    let eofStart = fileSize - 28
-    let eofSeq: seq[byte] = @BGZF_EOF
-
-    result = newSeq[ShardTask](nShards)
-    for i in 0 ..< nShards:
-      var prepend: seq[byte]
-      prepend.add(headerBytes)
-
-      # Determine the start virtual offset for this shard.
-      let (startBlockOff, startUOff) =
-        if i == 0: (firstBlockOff, firstUOff) else: boundaryVoffs[i - 1]
-
-      # If start block is mid-record (startUOff > 0), prepend the tail of
-      # that block (bytes [startUOff, end]).  If startUOff == 0, the block
-      # starts cleanly and is included in the raw-copy region.
-      if startUOff > 0:
-        let (_, tail) = splitBgzfBlockAtUOffset(vcfPath, startBlockOff, startUOff)
-        prepend.add(tail)
-
-      # rawStart: if startUOff > 0, skip past the split block; if 0, include it.
-      var hdrBuf = newSeq[byte](18)
-      block getSize:
-        let fTmp = open(vcfPath, fmRead)
-        fTmp.setFilePos(startBlockOff)
-        discard readBytes(fTmp, hdrBuf, 0, 18)
-        fTmp.close()
-      let startBlkSize = bgzfBlockSize(hdrBuf).int64
-      let rawStart: int64 =
-        if startUOff > 0: startBlockOff + startBlkSize else: startBlockOff
-
-      var rawEnd: int64
-      var boundaryHead: seq[byte]
-      if i < nShards - 1:
-        let (endBlockOff, endUOff) = boundaryVoffs[i]
-        rawEnd = endBlockOff
-        if endUOff > 0:
-          let (head, _) = splitBgzfBlockAtUOffset(vcfPath, endBlockOff, endUOff)
-          boundaryHead = head
-      else:
-        rawEnd = eofStart
-
-      if rawEnd < rawStart: rawEnd = rawStart
-      result[i] = ShardTask(vcfPath: vcfPath, outFd: -1, prepend: prepend,
-                            rawStart: rawStart, rawEnd: rawEnd,
-                            boundaryHead: boundaryHead, eofSeq: eofSeq,
-                            logLine: "")
-    return result  # BCF path complete; skip VCF path below
-
+    let (fdbo, uOff) = bcfFirstDataVirtualOffset(vcfPath)
+    firstBlockOff = fdbo
+    firstUOff = uOff
   else:
-    # VCF: TBI or CSI index, or auto-scan fallback.
+    # VCF: header from BGZF scan; first block offset.
     let (hb, fb) = getHeaderAndFirstBlock(vcfPath)
     headerBytes = hb
-    firstBlock  = fb
-    let tbi      = vcfPath & ".tbi"
-    let csi      = vcfPath & ".csi"
-    let hasIndex = fileExists(csi) or fileExists(tbi)
-    if forceScan or not hasIndex:
-      if not hasIndex:
-        stderr.writeLine &"warning: no index found for {vcfPath} — scanning BGZF blocks directly"
-        stderr.writeLine "  (create an index with 'tabix -p vcf' for faster operation)"
-      else:
-        info("--force-scan: ignoring index, scanning all BGZF blocks")
-      starts = scanAllBlockStarts(vcfPath, firstBlock)
-    else:
-      starts = readIndexBlockStarts(vcfPath)
-      if firstBlock notin starts: starts.add(firstBlock)
-      starts.sort()
-      if starts.len >= 2:
-        for off in scanBgzfBlockStarts(vcfPath, starts[0], starts[1]):
-          if off notin starts: starts.add(off)
-        starts.sort()
+    firstBlockOff = fb
+    firstUOff = 0  # VCF data block starts at byte 0
 
-  let (bounds, finalStarts, lengths) =
-    optimiseBoundaries(vcfPath, starts, nShards, nThreads, format = format)
-
-  var splits: seq[SplitPair]
-  if format == ffBcf:
-    if nThreads > 1 and bounds.len > 0:
-      var splitFVs = newSeq[FlowVar[SplitPair]](bounds.len)
-      for idx, bi in bounds:
-        splitFVs[idx] = spawn splitBcfChunkPair(vcfPath, finalStarts[bi], lengths[bi])
-      for fv in splitFVs:
-        splits.add(^fv)
-    else:
-      for bi in bounds:
-        splits.add(splitBcfChunkPair(vcfPath, finalStarts[bi], lengths[bi]))
+  # Build the list of virtual offsets used as candidate boundary points.
+  var voffs: seq[(int64, int)]
+  if forceScan and format == ffVcf:
+    info("--force-scan: ignoring index, scanning all BGZF blocks")
+    for off in scanAllBlockStarts(vcfPath, firstBlockOff):
+      voffs.add((off, 0))
   else:
-    if nThreads > 1 and bounds.len > 0:
-      var splitFVs = newSeq[FlowVar[SplitPair]](bounds.len)
-      for idx, bi in bounds:
-        splitFVs[idx] = spawn splitChunkPair(vcfPath, finalStarts[bi], lengths[bi])
-      for fv in splitFVs:
-        splits.add(^fv)
+    voffs = readIndexVirtualOffsets(vcfPath)
+    voffs.keepItIf(it[0] >= firstBlockOff)
+    if voffs.len == 0:
+      # No index for VCF — fall back to scanning all blocks.
+      stderr.writeLine &"warning: no index found for {vcfPath} — scanning BGZF blocks directly"
+      stderr.writeLine "  (create an index with 'tabix -p vcf' for faster operation)"
+      for off in scanAllBlockStarts(vcfPath, firstBlockOff):
+        voffs.add((off, 0))
+
+  # Ensure the first data virtual offset is in the list, then sort + dedupe.
+  let firstVO = (firstBlockOff, firstUOff)
+  if firstVO notin voffs: voffs.add(firstVO)
+  voffs.sort(proc(a, b: (int64, int)): int =
+    if a[0] != b[0]: cmp(a[0], b[0]) else: cmp(a[1], b[1]))
+  var deduped: seq[(int64, int)]
+  for i, v in voffs:
+    if i == 0 or v != voffs[i - 1]: deduped.add(v)
+  voffs = deduped
+  info(&"computeShards: {voffs.len} virtual offsets, firstData=({firstBlockOff},{firstUOff})")
+
+  # If nShards > voffs.len there are not enough index entries to place shard
+  # boundaries: each chunk needs at least one index entry. Either clamp the
+  # shard count down (clampShards) or error out.
+  var effN = nShards
+  if nShards > voffs.len:
+    if clampShards:
+      stderr.writeLine &"info: --clamp-shards: reducing -n from {nShards} to {voffs.len} ({voffs.len} index entries available in {vcfPath})"
+      effN = voffs.len
     else:
-      for bi in bounds:
-        let (h, t) = splitChunk(vcfPath, finalStarts[bi], lengths[bi])
-        splits.add(SplitPair(head: h, tail: t))
+      stderr.writeLine &"error: requested {nShards} shards but only {voffs.len} index entries available in {vcfPath}"
+      if format == ffVcf and not forceScan:
+        stderr.writeLine &"  reduce -n to at most {voffs.len}, use --force-scan to scan all BGZF blocks, or pass --clamp-shards to reduce -n automatically"
+      else:
+        stderr.writeLine &"  reduce -n to at most {voffs.len} or pass --clamp-shards to reduce -n automatically"
+      quit(1)
+
+  # Select effN-1 boundary virtual offsets, evenly spaced by index.
+  var boundaryVoffs: seq[(int64, int)]
+  for i in 1 ..< effN:
+    let idx = (i * voffs.len) div effN
+    boundaryVoffs.add(voffs[idx])
 
   let eofStart = fileSize - 28
   let eofSeq: seq[byte] = @BGZF_EOF
-  info(&"computeShards: {nShards} shards, file size {fileSize} bytes, EOF at {eofStart}")
+  info(&"computeShards: {effN} shards, file size {fileSize} bytes, EOF at {eofStart}")
 
-  result = newSeq[ShardTask](nShards)
-  for i in 0 ..< nShards:
+  result = newSeq[ShardTask](effN)
+  for i in 0 ..< effN:
     var prepend: seq[byte]
     prepend.add(headerBytes)
-    if i == 0:
-      if (bounds.len == 0 or finalStarts[0] < finalStarts[bounds[0]]) and
-         finalStarts.len >= 2:
-        if format == ffBcf:
-          prepend.add(removeBcfHeaderBytes(vcfPath))
-        else:
-          prepend.add(removeHeaderLines(vcfPath, 0, finalStarts[1]))
-    else:
-      prepend.add(splits[i - 1].tail)
+
+    # Determine the start virtual offset for this shard.
+    let (startBlockOff, startUOff) =
+      if i == 0: (firstBlockOff, firstUOff) else: boundaryVoffs[i - 1]
+
+    # If start block is mid-record (startUOff > 0), prepend the tail of
+    # that block (bytes [startUOff, end]).  If startUOff == 0, the block
+    # starts cleanly and is included in the raw-copy region.
+    if startUOff > 0:
+      let (_, tail) = splitBgzfBlockAtUOffset(vcfPath, startBlockOff, startUOff)
+      prepend.add(tail)
+
+    # rawStart: if startUOff > 0, skip past the split block; if 0, include it.
+    var hdrBuf = newSeq[byte](18)
+    block getSize:
+      let fTmp = open(vcfPath, fmRead)
+      fTmp.setFilePos(startBlockOff)
+      discard readBytes(fTmp, hdrBuf, 0, 18)
+      fTmp.close()
+    let startBlkSize = bgzfBlockSize(hdrBuf).int64
     let rawStart: int64 =
-      if i == 0:
-        if finalStarts.len >= 2: finalStarts[1] else: eofStart
-      else:
-        finalStarts[bounds[i - 1] + 1]
-    var rawEnd: int64 =
-      if i == nShards - 1: eofStart else: finalStarts[bounds[i]]
+      if startUOff > 0: startBlockOff + startBlkSize else: startBlockOff
+
+    var rawEnd: int64
+    var boundaryHead: seq[byte]
+    if i < effN - 1:
+      let (endBlockOff, endUOff) = boundaryVoffs[i]
+      rawEnd = endBlockOff
+      if endUOff > 0:
+        let (head, _) = splitBgzfBlockAtUOffset(vcfPath, endBlockOff, endUOff)
+        boundaryHead = head
+    else:
+      rawEnd = eofStart
+
     if rawEnd < rawStart: rawEnd = rawStart
-    let boundaryHead = if i < nShards - 1: splits[i].head else: @[]
     result[i] = ShardTask(vcfPath: vcfPath, outFd: -1, prepend: prepend,
                           rawStart: rawStart, rawEnd: rawEnd,
                           boundaryHead: boundaryHead, eofSeq: eofSeq,
@@ -829,16 +607,6 @@ proc readAndDecompressBlocks(vcfPath: string; starts: ptr seq[int64];
       if blkSize <= 0: break
       result.add(decompressBgzf(raw.toOpenArray(pos, pos + blkSize - 1)))
       pos += blkSize
-
-proc readAndDecompressOneBlock(vcfPath: string; start: int64;
-                                size: int64): seq[byte] {.gcsafe.} =
-  ## Read and decompress a single BGZF block.
-  let f = open(vcfPath, fmRead)
-  defer: f.close()
-  var blk = newSeq[byte](size.int)
-  f.setFilePos(start)
-  discard readBytes(f, blk, 0, size.int)
-  decompressBgzf(blk)
 
 proc findFirstNewline(data: openArray[byte]): int =
   ## Return index of first '\n' in data, or -1 if none.
@@ -979,16 +747,20 @@ proc writeInterleavedShard*(task: InterleavedTask): int {.gcsafe.} =
 
 proc scatter*(vcfPath: string; nShards: int; outputTemplate: string;
               nThreads: int = 1; forceScan: bool = false;
-              format: FileFormat = ffVcf) =
+              format: FileFormat = ffVcf; clampShards: bool = false) =
   ## Split vcfPath into nShards bgzipped files.
   ## outputTemplate may contain {} (replaced with zero-padded shard number)
   ## or not (shard_NN. is prepended to the basename). mkdir -p is applied.
   ## nThreads controls parallelism; pass 0 to use all CPUs.
   ## Output is always BGZF compressed.
+  ## When clampShards is true, nShards is reduced to the number of available
+  ## index entries if it would otherwise exceed it (instead of erroring).
   let actualThreads = if nThreads == 0: countProcessors() else: nThreads
   setMaxPoolSize(actualThreads)
   info(&"scatter: using {actualThreads} thread(s)")
-  var tasks = computeShards(vcfPath, nShards, actualThreads, forceScan, format)
+  var tasks = computeShards(vcfPath, nShards, actualThreads, forceScan, format,
+                            clampShards)
+  let nShards = tasks.len  # may be < requested nShards if clamped
   for i in 0 ..< nShards:
     let outPath = shardOutputPath(outputTemplate, i, nShards)
     createDir(outPath.parentDir)
