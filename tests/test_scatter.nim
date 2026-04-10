@@ -476,8 +476,8 @@ proc writeInterleavedShards(vcfPath: string; nShards, chunkSize: int;
   var csiVoffs: seq[(int64, int)]
 
   if fmt == ffBcf:
-    headerBytes = decompressBgzfBytes(extractBcfHeader(vcfPath))
-    let (firstDataBlockOff, uOff) = bcfFirstDataVirtualOffset(vcfPath)
+    let (hdr, firstDataBlockOff, uOff) = extractBcfHeaderAndFirstOffset(vcfPath)
+    headerBytes = hdr
     starts = scanBgzfBlockStarts(vcfPath, startAt = firstDataBlockOff,
                                  endAt = fileSize - 28)
     let csi = vcfPath & ".csi"

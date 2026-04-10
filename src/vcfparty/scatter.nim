@@ -128,8 +128,8 @@ proc computeShards*(vcfPath: string; nShards: int; nThreads: int = 1;
       stderr.writeLine &"error: BCF input requires a CSI index: {csi} not found"
       stderr.writeLine &"  (create one with 'bcftools index {vcfPath}')"
       quit(1)
-    headerBytes = extractBcfHeader(vcfPath)
-    let (fdbo, uOff) = bcfFirstDataVirtualOffset(vcfPath)
+    let (hdr, fdbo, uOff) = extractBcfHeaderAndFirstOffset(vcfPath)
+    headerBytes = compressToBgzfMulti(hdr)
     firstBlockOff = fdbo
     firstUOff = uOff
   else:

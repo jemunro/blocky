@@ -269,45 +269,6 @@ proc splitBgzfBlockAtUOffset*(path: string; offset: int64; uOff: int): (seq[byte
   let tail = if split >= data.len: @[] else: compressToBgzfMulti(data[split ..< data.len])
   result = (head, tail)
 
-proc bcfFirstDataVirtualOffset*(path: string): (int64, int) =
-  ## Return the virtual offset (file_offset, u_off) of the first BCF record.
-  ## file_offset is the BGZF block file offset; u_off is the uncompressed byte
-  ## offset within that block where the first record starts.
-  let starts = scanBgzfBlockStarts(path)
-  let f = open(path, fmRead)
-  defer: f.close()
-  var lText = -1'i64
-  var firstRecordUncompOff = -1'i64
-  var cumUncomp = 0'i64
-  var headerBuf: seq[byte]
-  for off in starts:
-    var hdr = newSeq[byte](18)
-    f.setFilePos(off)
-    if readBytes(f, hdr, 0, 18) < 18: break
-    let blkSize = bgzfBlockSize(hdr)
-    if blkSize <= 0: break
-    var blk = newSeq[byte](blkSize)
-    f.setFilePos(off)
-    discard readBytes(f, blk, 0, blkSize)
-    let decompressed = decompressBgzf(blk)
-    let blockLen = decompressed.len.int64
-    if lText < 0:
-      headerBuf.add(decompressed)
-      if headerBuf.len >= 9:
-        if headerBuf[0] != byte('B') or headerBuf[1] != byte('C') or
-           headerBuf[2] != byte('F') or headerBuf[3] != 0x02'u8 or
-           headerBuf[4] != 0x02'u8:
-          quit(&"bcfFirstDataVirtualOffset: {path}: not a BCF file (bad magic)", 1)
-        lText = leU32(headerBuf, 5).int64
-        firstRecordUncompOff = 5'i64 + 4'i64 + lText
-    if firstRecordUncompOff >= 0 and cumUncomp + blockLen > firstRecordUncompOff:
-      let uOff = (firstRecordUncompOff - cumUncomp).int
-      return (off, uOff)
-    cumUncomp += blockLen
-  if firstRecordUncompOff < 0:
-    quit(&"bcfFirstDataVirtualOffset: {path}: file too short to read BCF header", 1)
-  quit(&"bcfFirstDataVirtualOffset: {path}: first record not found in file", 1)
-
 proc decompressBgzfBytes*(data: openArray[byte]): seq[byte] =
   ## Decompress a sequence of concatenated BGZF blocks; return uncompressed bytes.
   ## Stops at the first invalid or incomplete block.
@@ -431,18 +392,20 @@ proc readIndexVirtualOffsets*(vcfPath: string): seq[(int64, int)] =
 # Header extraction — BCF and VCF
 # ---------------------------------------------------------------------------
 
-proc extractBcfHeader*(path: string): seq[byte] =
-  ## Extract the BCF header blob (5-byte magic + 4-byte l_text + l_text bytes)
-  ## from path, recompressed as BGZF.  Verifies the BCF magic and calls quit(1)
-  ## on any format error.  Uses compressToBgzfMulti to handle headers > 65536 bytes.
-  ## Walks BGZF blocks sequentially from offset 0 — no full-file scan needed
-  ## because the BCF header lives at the very start of the file.
+proc extractBcfHeaderAndFirstOffset*(path: string): (seq[byte], int64, int) =
+  ## Walk BGZF blocks from the start of path to extract the BCF header and
+  ## locate the first data record in one pass.  Returns (uncompressed header
+  ## bytes, first-record block file offset, first-record uncompressed byte
+  ## offset within that block).  Verifies the BCF magic and calls quit(1) on
+  ## any format error.  No full-file scan — only reads enough blocks to cover
+  ## the header plus the first record byte.
   let f = open(path, fmRead)
   defer: f.close()
   var accum: seq[byte]
   var lText = -1'i64
   var headerSize = -1'i64   # 5 + 4 + l_text
   var off = 0'i64
+  var cumUncomp = 0'i64
   var hdr = newSeq[byte](18)
   while true:
     f.setFilePos(off)
@@ -452,21 +415,32 @@ proc extractBcfHeader*(path: string): seq[byte] =
     var blk = newSeq[byte](blkSize)
     f.setFilePos(off)
     discard readBytes(f, blk, 0, blkSize)
-    accum.add(decompressBgzf(blk))
+    let content = decompressBgzf(blk)
+    let blockLen = content.len.int64
+    accum.add(content)
     if lText < 0 and accum.len >= 9:
       for i in 0 ..< 5:
         if accum[i] != BCF_MAGIC[i]:
-          quit(&"extractBcfHeader: {path}: invalid BCF magic", 1)
+          quit(&"extractBcfHeaderAndFirstOffset: {path}: invalid BCF magic", 1)
       var p = 5
       lText = readLeU32(accum, p).int64
       headerSize = 5'i64 + 4'i64 + lText
-    if headerSize >= 0 and accum.len.int64 >= headerSize:
-      return compressToBgzfMulti(accum[0 ..< headerSize.int])
+    if headerSize >= 0 and cumUncomp + blockLen > headerSize:
+      # First record byte lives in this block.
+      let firstUOff = (headerSize - cumUncomp).int
+      return (accum[0 ..< headerSize.int], off, firstUOff)
+    cumUncomp += blockLen
     off += blkSize.int64
   if headerSize < 0:
-    quit(&"extractBcfHeader: {path}: file too short to read BCF header", 1)
-  quit(&"extractBcfHeader: {path}: header claims l_text={lText} but file " &
-       &"only provides {accum.len} bytes", 1)
+    quit(&"extractBcfHeaderAndFirstOffset: {path}: file too short to read BCF header", 1)
+  quit(&"extractBcfHeaderAndFirstOffset: {path}: first record not found in file", 1)
+
+proc extractBcfHeader*(path: string): seq[byte] =
+  ## Extract the BCF header blob (5-byte magic + 4-byte l_text + l_text bytes)
+  ## from path, recompressed as BGZF.  Thin wrapper over
+  ## `extractBcfHeaderAndFirstOffset` that discards the virtual-offset fields.
+  let (hdr, _, _) = extractBcfHeaderAndFirstOffset(path)
+  compressToBgzfMulti(hdr)
 
 proc blockHasData(content: openArray[byte]; prevEndedWithNewline: bool): bool =
   ## Return true if content contains at least one complete line not starting

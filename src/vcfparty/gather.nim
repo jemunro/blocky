@@ -85,8 +85,6 @@ proc validateGatherConfig*(cfg: GatherConfig) =
       "format; VCF and BCF headers are stripped automatically"
     quit(1)
 
-# isBgzfStream, sniffFormat, sniffStreamFormat, sniffFileFormat are in vcf_utils.
-
 # ---------------------------------------------------------------------------
 # G2 — GC-safe cross-thread shared buffer type
 # ---------------------------------------------------------------------------

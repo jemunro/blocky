@@ -680,8 +680,8 @@ proc runShardsMerge*(vcfPath: string; nShards: int; outputPath: string;
   var firstUOff: int
 
   if fmt == ffBcf:
-    headerBytes = decompressBgzfBytes(extractBcfHeader(vcfPath))
-    let (fdbo, uOff) = bcfFirstDataVirtualOffset(vcfPath)
+    let (hdr, fdbo, uOff) = extractBcfHeaderAndFirstOffset(vcfPath)
+    headerBytes = hdr
     firstDataBlockOff = fdbo
     firstUOff = uOff
   else:
