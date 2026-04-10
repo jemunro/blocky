@@ -598,6 +598,13 @@ proc isBgzfStream*(firstBytes: openArray[byte]): bool =
   firstBytes[0] == BGZF_MAGIC[0] and firstBytes[1] == BGZF_MAGIC[1] and
   firstBytes[2] == BGZF_MAGIC[2] and firstBytes[3] == BGZF_MAGIC[3]
 
+proc isBgzfLevel0*(firstBytes: openArray[byte]): bool =
+  ## Return true if the first BGZF block uses stored (uncompressed) deflate.
+  ## Checks BTYPE bits (bits 1-2) of the deflate stream at byte 18.
+  ## BTYPE=00 is stored (level 0); BTYPE=01/10 is compressed (level 1+).
+  firstBytes.len > 18 and isBgzfStream(firstBytes) and
+  ((firstBytes[18] shr 1) and 0x03) == 0
+
 proc sniffFormat*(firstBytes: openArray[byte]): FileFormat =
   ## Detect format from uncompressed first bytes of a stream.
   ## BCF\x02\x02 → ffBcf; ##fileformat → ffVcf; anything else → ffText.

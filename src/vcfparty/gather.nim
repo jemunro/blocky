@@ -7,6 +7,9 @@ import std/[heapqueue, options, os, strformat, strutils, tables]
 import std/posix
 import vcf_utils
 
+proc c_memchr(s: pointer; c: cint; n: csize_t): pointer
+  {.importc: "memchr", header: "<string.h>".}
+
 # ---------------------------------------------------------------------------
 # Types
 # ---------------------------------------------------------------------------
@@ -334,55 +337,68 @@ proc readExact(r: var BufferedFdReader; dst: var openArray[byte]; count: int): b
     written += avail
   return true
 
-proc readNextVcfRecord*(r: var BufferedFdReader): seq[byte] =
-  ## Read one VCF record (\n-terminated line) from the buffered reader.
-  result = @[]
+proc readNextVcfRecordInto*(r: var BufferedFdReader; buf: var seq[byte]): bool =
+  ## Read one VCF record (\n-terminated line) into buf, reusing its allocation.
+  ## Returns true if a record was read, false on EOF.
+  buf.setLen(0)
   while true:
     if r.pos >= r.len:
       r.fill()
-      if r.eof: return
-    # Scan for \n in the buffered data.
+      if r.eof: return buf.len > 0
     let start = r.pos
-    var i = start
-    while i < r.len:
-      if r.buf[i] == byte('\n'):
-        # Found end of record. Copy start..i (inclusive) to result.
-        let chunk = i - start + 1
-        let oldLen = result.len
-        result.setLen(oldLen + chunk)
-        copyMem(addr result[oldLen], addr r.buf[start], chunk)
-        r.pos = i + 1
-        return
-      inc i
-    # No \n found — copy entire remaining buffer and refill.
+    let searchLen = r.len - start
+    let found = c_memchr(addr r.buf[start], cint('\n'), csize_t(searchLen))
+    if found != nil:
+      let i = cast[int](found) - cast[int](addr r.buf[0])
+      let chunk = i - start + 1
+      let oldLen = buf.len
+      buf.setLen(oldLen + chunk)
+      copyMem(addr buf[oldLen], addr r.buf[start], chunk)
+      r.pos = i + 1
+      return true
     let chunk = r.len - start
-    let oldLen = result.len
-    result.setLen(oldLen + chunk)
-    copyMem(addr result[oldLen], addr r.buf[start], chunk)
+    let oldLen = buf.len
+    buf.setLen(oldLen + chunk)
+    copyMem(addr buf[oldLen], addr r.buf[start], chunk)
     r.pos = r.len
 
-proc readNextBcfRecord*(r: var BufferedFdReader): seq[byte] =
-  ## Read one BCF binary record from the buffered reader.
+proc readNextVcfRecord*(r: var BufferedFdReader): seq[byte] =
+  ## Read one VCF record (\n-terminated line) from the buffered reader.
+  result = @[]
+  discard r.readNextVcfRecordInto(result)
+
+proc readNextBcfRecordInto*(r: var BufferedFdReader; buf: var seq[byte]): bool =
+  ## Read one BCF binary record into buf, reusing its allocation.
+  ## Returns true if a record was read, false on EOF.
   var hdr: array[8, byte]
-  if not r.readExact(hdr, 8): return @[]
+  if not r.readExact(hdr, 8):
+    buf.setLen(0)
+    return false
   let lShared = (hdr[0].uint32 or (hdr[1].uint32 shl 8) or
                  (hdr[2].uint32 shl 16) or (hdr[3].uint32 shl 24)).int
   let lIndiv  = (hdr[4].uint32 or (hdr[5].uint32 shl 8) or
                  (hdr[6].uint32 shl 16) or (hdr[7].uint32 shl 24)).int
-  let payloadLen = lShared + lIndiv
-  # Uninit alloc — every byte is overwritten below (8 header + payloadLen from fd).
-  result = newSeqUninit[byte](8 + payloadLen)
-  copyMem(addr result[0], addr hdr[0], 8)
-  # Read payload directly into result[8..].
+  let totalSize = 8 + lShared + lIndiv
+  buf.setLen(totalSize)
+  copyMem(addr buf[0], addr hdr[0], 8)
   var written = 0
+  let payloadLen = lShared + lIndiv
   while written < payloadLen:
     if r.pos >= r.len:
       r.fill()
-      if r.eof: return @[]
+      if r.eof:
+        buf.setLen(0)
+        return false
     let avail = min(r.len - r.pos, payloadLen - written)
-    copyMem(addr result[8 + written], addr r.buf[r.pos], avail)
+    copyMem(addr buf[8 + written], addr r.buf[r.pos], avail)
     r.pos += avail
     written += avail
+  return true
+
+proc readNextBcfRecord*(r: var BufferedFdReader): seq[byte] =
+  ## Read one BCF binary record from the buffered reader.
+  result = @[]
+  discard r.readNextBcfRecordInto(result)
 
 # ---------------------------------------------------------------------------
 # Buffered fd writer — batches small writes into 64KB syscalls
@@ -475,10 +491,14 @@ proc extractSortKey*(record: seq[byte]; fmt: FileFormat;
   else:
     var tab0 = -1
     var tab1 = -1
-    for i in 0 ..< record.len:
-      if record[i] == byte('\t'):
-        if tab0 < 0: tab0 = i
-        elif tab1 < 0: tab1 = i; break
+    let p0 = c_memchr(unsafeAddr record[0], cint('\t'), csize_t(record.len))
+    if p0 != nil:
+      tab0 = cast[int](p0) - cast[int](unsafeAddr record[0])
+      let rest = record.len - tab0 - 1
+      if rest > 0:
+        let p1 = c_memchr(unsafeAddr record[tab0 + 1], cint('\t'), csize_t(rest))
+        if p1 != nil:
+          tab1 = cast[int](p1) - cast[int](unsafeAddr record[0])
     if tab0 < 0 or tab1 < 0: return (high(int), 0'i32)
     # Reuse chromBuf to avoid per-record heap allocation.
     chromBuf.setLen(tab0)
@@ -536,26 +556,28 @@ proc kWayMerge*(fds: seq[cint]; outFd: cint; fmt: FileFormat;
   for i in 0 ..< fds.len:
     readers[i] = initBufferedFdReader(fds[i])
 
-  template nextRec(idx: int): seq[byte] =
-    if fmt == ffBcf: readers[idx].readNextBcfRecord()
-    else:            readers[idx].readNextVcfRecord()
+  template nextRecInto(idx: int; buf: var seq[byte]): bool =
+    if fmt == ffBcf: readers[idx].readNextBcfRecordInto(buf)
+    else:            readers[idx].readNextVcfRecordInto(buf)
 
   # Seed the heap with the first record from each stream.
   for i in 0 ..< fds.len:
-    var rec = nextRec(i)
-    if rec.len > 0:
+    var rec: seq[byte]
+    if nextRecInto(i, rec):
       let (rank, pos) = extractSortKey(rec, fmt, contigMap, chromBuf)
       heap.push(MergeEntry(rank: rank, pos: pos, fdIdx: i, rec: move rec))
 
-  # Merge loop: always emit the minimum-key record.
+  # Merge loop: always emit the minimum-key record, reusing the popped
+  # entry's buffer for the next record from the same stream.
   while heap.len > 0:
-    let entry = heap.pop()
+    var entry = heap.pop()
     writer.write(entry.rec)
-    # Refill from the same stream.
-    var rec = nextRec(entry.fdIdx)
-    if rec.len > 0:
-      let (rank, pos) = extractSortKey(rec, fmt, contigMap, chromBuf)
-      heap.push(MergeEntry(rank: rank, pos: pos, fdIdx: entry.fdIdx, rec: move rec))
+    # Reuse entry.rec buffer — setLen(0) keeps the allocation, nextRecInto
+    # grows it back to the next record's size (usually identical capacity).
+    if nextRecInto(entry.fdIdx, entry.rec):
+      let (rank, pos) = extractSortKey(entry.rec, fmt, contigMap, chromBuf)
+      heap.push(MergeEntry(rank: rank, pos: pos, fdIdx: entry.fdIdx,
+                           rec: move entry.rec))
   writer.flush()
 
 # ---------------------------------------------------------------------------

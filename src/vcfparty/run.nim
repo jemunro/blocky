@@ -521,7 +521,8 @@ proc doMergeFeeder(shardIdx: int; srcFd: cint; relayWriteFd: cint): int {.gcsafe
   let (detFmt, detBgzf) = sniffStreamFormat(raw.toOpenArray(0, n0.int - 1))
   fmt    = detFmt
   isBgzf = detBgzf
-  if isBgzf and not gStreamProbe.bgzfWarned:
+  if isBgzf and not gStreamProbe.bgzfWarned and
+     not isBgzfLevel0(raw.toOpenArray(0, n0.int - 1)):
     gStreamProbe.bgzfWarned = true
     stderr.writeLine "warning: +merge+ works best with uncompressed output (-Ou/-Ov) from the last pipeline stage"
   appendReadToAccum(raw, n0.int, isBgzf, rawAccum, bgzfPos, pending)
