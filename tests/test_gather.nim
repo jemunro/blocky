@@ -309,9 +309,9 @@ timed("G2.6", "runInterceptor: BCF header stripping"):
   bcfData.add(records)
 
   # Set global state: uncompressed BCF detected by shard 0.
-  gDetectedFormat = ffBcf
-  gStreamIsBgzf   = false
-  gChromLine.ready = true
+  gStreamProbe.format = ffBcf
+  gStreamProbe.isBgzf   = false
+  gStreamProbe.chromLine.ready = true
 
   var fds: array[2, cint]
   doAssert posix.pipe(fds) == 0
@@ -341,14 +341,14 @@ timed("G2.7", "runInterceptor: VCF header stripping"):
   for c in "##fileformat=VCFv4.2\n#CHROM\tPOS\n1\t100\n":
     vcfData.add(byte(c))
 
-  gDetectedFormat = ffVcf
-  gStreamIsBgzf   = false
-  # Set gChromLine.buf to match the #CHROM line in vcfData above.
+  gStreamProbe.format = ffVcf
+  gStreamProbe.isBgzf   = false
+  # Set gStreamProbe.chromLine.buf to match the #CHROM line in vcfData above.
   let chromStr = "#CHROM\tPOS"
-  gChromLine.len = chromStr.len.int32
+  gStreamProbe.chromLine.len = chromStr.len.int32
   for k in 0 ..< chromStr.len:
-    gChromLine.buf[k] = byte(chromStr[k])
-  gChromLine.ready = true
+    gStreamProbe.chromLine.buf[k] = byte(chromStr[k])
+  gStreamProbe.chromLine.ready = true
 
   var fds: array[2, cint]
   doAssert posix.pipe(fds) == 0
@@ -379,9 +379,9 @@ timed("G2.8", "runInterceptor: text header stripping (--header-n)"):
   var data: seq[byte]
   for c in "hdr1\nhdr2\ndata1\ndata2\n": data.add(byte(c))
 
-  gDetectedFormat = ffText
-  gStreamIsBgzf   = false
-  gChromLine.ready = true
+  gStreamProbe.format = ffText
+  gStreamProbe.isBgzf   = false
+  gStreamProbe.chromLine.ready = true
 
   var fds: array[2, cint]
   doAssert posix.pipe(fds) == 0
@@ -413,9 +413,9 @@ timed("G2.9", "runInterceptor: no-strip pass-through"):
   var data: seq[byte]
   for c in "##header\nrecord1\nrecord2\n": data.add(byte(c))
 
-  gDetectedFormat = ffText
-  gStreamIsBgzf   = false
-  gChromLine.ready = true
+  gStreamProbe.format = ffText
+  gStreamProbe.isBgzf   = false
+  gStreamProbe.chromLine.ready = true
 
   var fds: array[2, cint]
   doAssert posix.pipe(fds) == 0
@@ -527,13 +527,13 @@ timed("G3.4", "runInterceptor: shard strip + BGZF recompression"):
   var vcfData: seq[byte]
   for c in "##fileformat=VCFv4.2\n#CHROM\tPOS\n1\t100\n": vcfData.add(byte(c))
 
-  gDetectedFormat = ffVcf
-  gStreamIsBgzf   = false
+  gStreamProbe.format = ffVcf
+  gStreamProbe.isBgzf   = false
   let chromStr4 = "#CHROM\tPOS"
-  gChromLine.len = chromStr4.len.int32
+  gStreamProbe.chromLine.len = chromStr4.len.int32
   for k in 0 ..< chromStr4.len:
-    gChromLine.buf[k] = byte(chromStr4[k])
-  gChromLine.ready = true
+    gStreamProbe.chromLine.buf[k] = byte(chromStr4[k])
+  gStreamProbe.chromLine.ready = true
 
   var fds: array[2, cint]
   doAssert posix.pipe(fds) == 0
@@ -566,13 +566,13 @@ timed("G3.5", "runInterceptor: BGZF shard strip + recompression"):
   for c in "##fileformat=VCFv4.2\n#CHROM\tPOS\n1\t200\n": raw.add(byte(c))
   let compressed = compressToBgzfMulti(raw)
 
-  gDetectedFormat = ffVcf
-  gStreamIsBgzf   = true
+  gStreamProbe.format = ffVcf
+  gStreamProbe.isBgzf   = true
   let chromStr5 = "#CHROM\tPOS"
-  gChromLine.len = chromStr5.len.int32
+  gStreamProbe.chromLine.len = chromStr5.len.int32
   for k in 0 ..< chromStr5.len:
-    gChromLine.buf[k] = byte(chromStr5[k])
-  gChromLine.ready = true
+    gStreamProbe.chromLine.buf[k] = byte(chromStr5[k])
+  gStreamProbe.chromLine.ready = true
 
   var fds: array[2, cint]
   doAssert posix.pipe(fds) == 0
@@ -622,10 +622,10 @@ timed("G3.6", "streaming bounded peak pending"):
   let compressed = compressToBgzfMulti(raw)
 
   # Pre-set the cross-shard globals as if shard 0 were running solo.
-  gDetectedFormat = ffVcf
-  gStreamIsBgzf   = true
-  gChromLine.ready = false
-  gChromLine.len   = 0
+  gStreamProbe.format = ffVcf
+  gStreamProbe.isBgzf   = true
+  gStreamProbe.chromLine.ready = false
+  gStreamProbe.chromLine.len   = 0
 
   var fds: array[2, cint]
   doAssert posix.pipe(fds) == 0
@@ -738,10 +738,10 @@ timed("G3.7", "BGZF->BGZF shard 0 fast path: 0 re-encoded bytes"):
   doAssert raw.len > 5 * 1024 * 1024,
     &"G3.7: synthetic input only {raw.len} bytes — adjust generator"
 
-  gDetectedFormat  = ffVcf
-  gStreamIsBgzf    = true
-  gChromLine.ready = false
-  gChromLine.len   = 0
+  gStreamProbe.format  = ffVcf
+  gStreamProbe.isBgzf    = true
+  gStreamProbe.chromLine.ready = false
+  gStreamProbe.chromLine.len   = 0
 
   let tmpDir  = createTempDir("vcfparty_g37_", "")
   let tmpPath = tmpDir / "shard0.vcf.gz"
@@ -775,13 +775,13 @@ timed("G3.8", "BGZF->BGZF shard 1 fast path: bounded re-encoded bytes"):
 
   # Pre-set the cross-shard globals as if shard 0 had already published its
   # header detection and #CHROM line.
-  gDetectedFormat = ffVcf
-  gStreamIsBgzf   = true
+  gStreamProbe.format = ffVcf
+  gStreamProbe.isBgzf   = true
   let chromStr = "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO"
-  gChromLine.len = chromStr.len.int32
+  gStreamProbe.chromLine.len = chromStr.len.int32
   for k in 0 ..< chromStr.len:
-    gChromLine.buf[k] = byte(chromStr[k])
-  gChromLine.ready = true
+    gStreamProbe.chromLine.buf[k] = byte(chromStr[k])
+  gStreamProbe.chromLine.ready = true
 
   let tmpDir  = createTempDir("vcfparty_g38_", "")
   let tmpPath = tmpDir / "shard1.vcf.gz"
@@ -839,13 +839,13 @@ timed("G3.9", "BGZF->BGZF shard 1 header-on-block-edge: 0 re-encoded bytes"):
   var compressed = compressedHeader
   compressed.add(compressedRecords)
 
-  gDetectedFormat = ffVcf
-  gStreamIsBgzf   = true
+  gStreamProbe.format = ffVcf
+  gStreamProbe.isBgzf   = true
   let chromStr = "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO"
-  gChromLine.len = chromStr.len.int32
+  gStreamProbe.chromLine.len = chromStr.len.int32
   for k in 0 ..< chromStr.len:
-    gChromLine.buf[k] = byte(chromStr[k])
-  gChromLine.ready = true
+    gStreamProbe.chromLine.buf[k] = byte(chromStr[k])
+  gStreamProbe.chromLine.ready = true
 
   let tmpDir  = createTempDir("vcfparty_g39_", "")
   let tmpPath = tmpDir / "shard1.vcf.gz"

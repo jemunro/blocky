@@ -244,7 +244,9 @@ timed("R3.1", "runShards: 1 shard, cat stage"):
   doAssert fileExists(SmallVcf), "fixture missing — run generate_fixtures.sh"
   let tmpDir = createTempDir("vcfparty_", "")
   let tmpl = tmpDir / "out.{}.vcf.gz"
-  runShards(SmallVcf, 1, tmpl, 1, false, @[@["cat"]])
+  runPipeline(RunPipelineCfg(
+    mode: pmTool, vcfPath: SmallVcf, nShards: 1, nThreads: 1,
+    stages: @[@["cat"]], outputTemplate: tmpl))
   let outPath = shardOutputPath(tmpl, 0, 1)
   doAssert fileExists(outPath), "output missing: " & outPath
   let (_, bcCode) = execCmdEx("bcftools view -HG " & outPath & " > /dev/null 2>&1")
@@ -261,7 +263,9 @@ timed("R3.2", "runShards: 4 shards concurrent"):
   doAssert fileExists(SmallVcf), "fixture missing"
   let tmpDir = createTempDir("vcfparty_", "")
   let tmpl = tmpDir / "out.{}.vcf.gz"
-  runShards(SmallVcf, 4, tmpl, 1, false, @[@["cat"]])
+  runPipeline(RunPipelineCfg(
+    mode: pmTool, vcfPath: SmallVcf, nShards: 4, nThreads: 1,
+    stages: @[@["cat"]], outputTemplate: tmpl))
   var total = 0
   var shardPaths: seq[string]
   for i in 0..3:
@@ -284,7 +288,9 @@ timed("R3.3", "runShards BCF: 4 shards, bcftools view -Ob"):
   doAssert fileExists(SmallBcf), "BCF fixture missing — run generate_fixtures.sh"
   let tmpDir = createTempDir("vcfparty_", "")
   let tmpl = tmpDir / "out.{}.bcf"
-  runShards(SmallBcf, 4, tmpl, 1, false, @[@["bcftools", "view", "-Ob"]])
+  runPipeline(RunPipelineCfg(
+    mode: pmTool, vcfPath: SmallBcf, nShards: 4, nThreads: 1,
+    stages: @[@["bcftools", "view", "-Ob"]], outputTemplate: tmpl))
   var total = 0
   var bcfShardPaths: seq[string]
   for i in 0..3:
@@ -577,7 +583,9 @@ timed("R7.1", "tool-managed API: 2 shards, tool writes own output"):
   # Tool writes its own output using {} substitution.
   # We use bcftools view -Oz -o <path> rather than stdout.
   let stages = @[@["bcftools", "view", "-Oz", "-o", outTemplate]]
-  runShards(SmallVcf, 2, "", 1, false, stages, toolManaged = true)
+  runPipeline(RunPipelineCfg(
+    mode: pmTool, vcfPath: SmallVcf, nShards: 2, nThreads: 1,
+    stages: stages, toolManaged: true))
   var total = 0
   for i in 0..1:
     let p = shardOutputPath(outTemplate, i, 2)

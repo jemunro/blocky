@@ -5,9 +5,6 @@
 
 import std/[heapqueue, options, os, strformat, strutils, tables]
 import std/posix
-{.warning[Deprecated]: off.}
-import std/threadpool
-{.warning[Deprecated]: on.}
 import vcf_utils
 
 # ---------------------------------------------------------------------------
@@ -98,20 +95,40 @@ type SharedBuf* = object
   ready*: bool
 
 # ---------------------------------------------------------------------------
-# G2 — Global detected format (set by shard 0 interceptor, read by shards 1..N)
+# G2 — Shard-0 format-detection state (set by shard 0 worker, read by others)
 # ---------------------------------------------------------------------------
 
-var gDetectedFormat*: FileFormat   ## Format detected from shard 0 stream.
-var gStreamIsBgzf*:   bool = false   ## Whether shard 0 stream was BGZF-compressed.
-## gChromLine — #CHROM line captured by shard 0. gChromLine.ready also serves
-## as the format-detection release flag for shards 1..N: they spin on it before
-## reading gDetectedFormat or gStreamIsBgzf.
-var gChromLine*: SharedBuf
+type StreamProbe* = object
+  ## Unified shard-0-signalling state for every terminal-operator mode.
+  ## Interceptor modes (+concat+, +collect+) use `format`, `isBgzf`, and
+  ## `chromLine` — shards 1..N spin on `chromLine.ready` before reading
+  ## `format`/`isBgzf`.
+  ## Merge mode (+merge+) uses `format`, `isBgzf`, `header`, and `bgzfWarned`
+  ## — the main thread spins on `header.ready` before extracting the contig
+  ## table. `bgzfWarned` is a one-shot "works best with uncompressed" warning.
+  ## The two `SharedBuf` fields are independent; no mode uses both.
+  format*:     FileFormat
+  isBgzf*:     bool
+  chromLine*:  SharedBuf
+  header*:     SharedBuf
+  bgzfWarned*: bool
 
-## M5 merge globals — set by shard 0 feeder, read by main thread.
-var gMergeFormat*:     FileFormat = ffVcf
-var gMergeHeader*:     SharedBuf
-var gMergeBgzfWarned*: bool = false
+var gStreamProbe*: StreamProbe
+
+proc resetInterceptor*(p: var StreamProbe) =
+  ## Reset interceptor-mode fields (+concat+, +collect+) before a run.
+  p.format          = ffText
+  p.isBgzf          = false
+  p.chromLine.ready = false
+  p.chromLine.len   = 0
+
+proc resetMerge*(p: var StreamProbe; defaultFmt: FileFormat) =
+  ## Reset merge-mode fields (+merge+) before a run.
+  p.format        = defaultFmt
+  p.isBgzf        = false
+  p.header.ready  = false
+  p.header.len    = 0
+  p.bgzfWarned    = false
 
 # ---------------------------------------------------------------------------
 # G3 — Header stripping helpers
@@ -759,10 +776,10 @@ proc runInterceptor*(cfg: GatherConfig; shardIdx: int; inputFd: cint; tmpPath: s
   ## entire shard in memory.
   ##
   ## Phase A — read first chunk; sniff format on shard 0; shards 1..N spinwait
-  ##           on `gChromLine.ready` then read the format from globals.
+  ##           on `gStreamProbe.chromLine.ready` then read the format from globals.
   ## Phase B — accumulate uncompressed `pending` (via `appendReadToAccum`) until
   ##           `findVcfHeaderEnd` / `findBcfHeaderEnd` succeeds.  Shard 0 sets
-  ##           `gChromLine`/`gChromLine.ready`; shards 1..N validate `#CHROM`
+  ##           `gStreamProbe.chromLine`/`gStreamProbe.chromLine.ready`; shards 1..N validate `#CHROM`
   ##           and bail out cleanly on mismatch (no record bytes written).
   ## Phase C — flush `pending` (recompressed if `cfg.compression == compBgzf`,
   ##           otherwise raw).  Continue reading: each iteration accumulates
@@ -796,10 +813,10 @@ proc runInterceptor*(cfg: GatherConfig; shardIdx: int; inputFd: cint; tmpPath: s
     if initRead <= 0:
       # Empty shard.  Shard 0 must still release shards 1..N.
       if shardIdx == 0:
-        gDetectedFormat = ffText
-        gStreamIsBgzf   = false
-        gChromLine.len   = 0
-        gChromLine.ready = true
+        gStreamProbe.format = ffText
+        gStreamProbe.isBgzf   = false
+        gStreamProbe.chromLine.len   = 0
+        gStreamProbe.chromLine.ready = true
       return 0
     if shardIdx == 0:
       let (detFmt, detBgzf) =
@@ -811,10 +828,10 @@ proc runInterceptor*(cfg: GatherConfig; shardIdx: int; inputFd: cint; tmpPath: s
           &"but --gather expects {cfg.format}; proceeding"
     else:
       # Wait until shard 0 has detected the format.
-      while not gChromLine.ready:
+      while not gStreamProbe.chromLine.ready:
         sleep(1)
-      fmt = gDetectedFormat
-      isBgzf = gStreamIsBgzf
+      fmt = gStreamProbe.format
+      isBgzf = gStreamProbe.isBgzf
 
     # ── Text fallback: buffer the whole shard, reuse the existing helpers.
     # Text inputs are tiny in practice; --header-n / --header-pattern semantics
@@ -829,10 +846,10 @@ proc runInterceptor*(cfg: GatherConfig; shardIdx: int; inputFd: cint; tmpPath: s
         allBytes.setLen(base + got)
         copyMem(addr allBytes[base], addr buf[0], got)
       if shardIdx == 0:
-        gDetectedFormat = fmt
-        gStreamIsBgzf   = isBgzf
-        gChromLine.len   = 0
-        gChromLine.ready = true
+        gStreamProbe.format = fmt
+        gStreamProbe.isBgzf   = isBgzf
+        gStreamProbe.chromLine.len   = 0
+        gStreamProbe.chromLine.ready = true
         let cleaned = if isBgzf: stripTrailingEof(allBytes) else: allBytes
         writeShardZero(outFile, cleaned, isBgzf, cfg.compression)
       else:
@@ -859,23 +876,23 @@ proc runInterceptor*(cfg: GatherConfig; shardIdx: int; inputFd: cint; tmpPath: s
     # Set or validate #CHROM before any record byte is written.
     if shardIdx == 0:
       let chromStr = extractChromLine(pending[0 ..< hEnd])
-      gDetectedFormat = fmt
-      gStreamIsBgzf   = isBgzf
-      gChromLine.len = min(chromStr.len, gChromLine.buf.len).int32
-      for k in 0 ..< gChromLine.len.int:
-        gChromLine.buf[k] = byte(chromStr[k])
-      gChromLine.ready = true
+      gStreamProbe.format = fmt
+      gStreamProbe.isBgzf   = isBgzf
+      gStreamProbe.chromLine.len = min(chromStr.len, gStreamProbe.chromLine.buf.len).int32
+      for k in 0 ..< gStreamProbe.chromLine.len.int:
+        gStreamProbe.chromLine.buf[k] = byte(chromStr[k])
+      gStreamProbe.chromLine.ready = true
     else:
       let myChromLine = extractChromLine(pending[0 ..< hEnd])
-      let glen = gChromLine.len.int
+      let glen = gStreamProbe.chromLine.len.int
       var match = (myChromLine.len == glen)
       if match:
         for k in 0 ..< glen:
-          if byte(myChromLine[k]) != gChromLine.buf[k]:
+          if byte(myChromLine[k]) != gStreamProbe.chromLine.buf[k]:
             match = false; break
       if not match:
         var shard0Line = newString(glen)
-        for k in 0 ..< glen: shard0Line[k] = char(gChromLine.buf[k])
+        for k in 0 ..< glen: shard0Line[k] = char(gStreamProbe.chromLine.buf[k])
         stderr.writeLine &"error: gather: #CHROM line mismatch at shard {shardIdx + 1}:"
         stderr.writeLine &"  shard 1: {shard0Line}"
         stderr.writeLine &"  shard {shardIdx + 1}: {myChromLine}"
@@ -1054,10 +1071,7 @@ proc gatherFiles*(cfg: GatherConfig; inputPaths: seq[string]) =
   if inputPaths.len == 0:
     stderr.writeLine "error: gather: no input files provided"
     quit(1)
-  gChromLine.ready = false
-  gDetectedFormat = ffText
-  gStreamIsBgzf   = false
-  gChromLine.len   = 0
+  resetInterceptor(gStreamProbe)
 
   # ── Phase 1: read shard 0, detect format, validate #CHROM ──────────────────
   let s0Size = getFileSize(inputPaths[0]).int
@@ -1067,9 +1081,9 @@ proc gatherFiles*(cfg: GatherConfig; inputPaths: seq[string]) =
     discard readBytes(fs0, s0Bytes, 0, s0Size)
     fs0.close()
   let (fmt, isBgzf) = sniffStreamFormat(s0Bytes)
-  gDetectedFormat = fmt
-  gStreamIsBgzf   = isBgzf
-  gChromLine.ready = true
+  gStreamProbe.format = fmt
+  gStreamProbe.isBgzf   = isBgzf
+  gStreamProbe.chromLine.ready = true
   if fmt != cfg.format and not cfg.toStdout:
     stderr.writeLine &"warning: shard 0 format detected as {fmt} " &
       &"but output expects {cfg.format}; proceeding"
@@ -1105,151 +1119,3 @@ proc gatherFiles*(cfg: GatherConfig; inputPaths: seq[string]) =
   if cfg.compression == compBgzf:
     discard outFile.writeBytes(BGZF_EOF, 0, BGZF_EOF.len)
   if not cfg.toStdout: outFile.close()
-
-# ---------------------------------------------------------------------------
-# M6 — gather --merge: k-way merge of existing shard files
-# ---------------------------------------------------------------------------
-
-proc doFileFeeder(shardIdx: int; path: string; relayWriteFd: cint): int {.gcsafe.} =
-  ## Open path, strip VCF/BCF header, decompress if BGZF, relay raw record
-  ## bytes to relayWriteFd. Shard 0 also captures the header into
-  ## gMergeHeader.buf and signals gMergeHeader.ready. Closes relayWriteFd.
-  const ReadSize = 65536
-  var raw     = newSeqUninit[byte](ReadSize)
-  var pending: seq[byte]
-  var isBgzf  = false
-  var fmt     = ffVcf
-  var rawAccum: seq[byte]
-  var bgzfPos = 0
-
-  let fileFd = posix.open(path.cstring, O_RDONLY)
-  if fileFd < 0:
-    discard posix.close(relayWriteFd)
-    if shardIdx == 0:
-      gMergeFormat      = ffVcf
-      gMergeHeader.ready = true
-    return 1
-
-  let n0 = posix.read(fileFd, cast[pointer](addr raw[0]), ReadSize)
-  if n0 <= 0:
-    discard posix.close(fileFd)
-    discard posix.close(relayWriteFd)
-    if shardIdx == 0:
-      gMergeFormat      = ffVcf
-      gMergeHeader.ready = true
-    return 0
-
-  let (detFmt, detBgzf) = sniffStreamFormat(raw.toOpenArray(0, n0.int - 1))
-  fmt    = detFmt
-  isBgzf = detBgzf
-  appendReadToAccum(raw, n0.int, isBgzf, rawAccum, bgzfPos, pending)
-
-  var hEnd = -1
-  while hEnd < 0:
-    hEnd =
-      case fmt
-      of ffBcf:  findBcfHeaderEnd(pending)
-      of ffVcf:  findVcfHeaderEnd(pending)
-      of ffText: 0
-    if hEnd >= 0: break
-    let n = posix.read(fileFd, cast[pointer](addr raw[0]), ReadSize)
-    if n <= 0: break
-    appendReadToAccum(raw, n.int, isBgzf, rawAccum, bgzfPos, pending)
-  if hEnd < 0: hEnd = pending.len
-
-  if shardIdx == 0:
-    let sz = min(hEnd, gMergeHeader.buf.len)
-    if sz > 0:
-      copyMem(addr gMergeHeader.buf[0], unsafeAddr pending[0], sz)
-    gMergeHeader.len   = sz.int32
-    gMergeFormat      = fmt
-    gMergeHeader.ready = true
-
-  template relayBytes(data: openArray[byte]) =
-    var w = 0
-    while w < data.len:
-      let nw = posix.write(relayWriteFd, cast[pointer](unsafeAddr data[w]),
-                           data.len - w)
-      if nw <= 0:
-        discard posix.close(relayWriteFd)
-        discard posix.close(fileFd)
-        return 0
-      w += nw
-
-  if hEnd < pending.len:
-    relayBytes(pending.toOpenArray(hEnd, pending.high))
-  pending = @[]
-
-  while true:
-    let n = posix.read(fileFd, cast[pointer](addr raw[0]), ReadSize)
-    if n <= 0: break
-    if isBgzf:
-      rawAccum.add(raw.toOpenArray(0, n.int - 1))
-      flushBgzfAccum(rawAccum, bgzfPos, pending)
-      if pending.len > 0:
-        relayBytes(pending.toOpenArray(0, pending.high))
-        pending = @[]
-    else:
-      relayBytes(raw.toOpenArray(0, n - 1))
-
-  discard posix.close(relayWriteFd)
-  discard posix.close(fileFd)
-  result = 0
-
-proc gatherFilesMerge*(cfg: GatherConfig; inputPaths: seq[string]) =
-  ## k-way merge of sorted shard files into cfg.outputPath (or stdout).
-  ## Each shard file is opened, decompressed if BGZF, header stripped,
-  ## and records merged in genomic order via kWayMerge. No temp files.
-  if inputPaths.len == 0:
-    stderr.writeLine "error: gather: no input files provided"
-    quit(1)
-
-  let nShards = inputPaths.len
-  setMaxPoolSize(max(4, nShards))
-
-  gMergeHeader.ready = false
-  gMergeHeader.len   = 0
-  gMergeFormat      = ffVcf
-
-  var relayReadFds: seq[cint]
-  var feederFvs:   seq[FlowVar[int]]
-
-  for i in 0 ..< nShards:
-    var relayPipe: array[2, cint]
-    if posix.pipe(relayPipe) != 0:
-      stderr.writeLine &"error: pipe() failed for shard {i + 1}"
-      quit(1)
-    relayReadFds.add(relayPipe[0])
-    feederFvs.add(spawn doFileFeeder(i, inputPaths[i], relayPipe[1]))
-
-  while not gMergeHeader.ready: sleep(1)
-
-  let hdrSlice    = @(gMergeHeader.buf[0 ..< gMergeHeader.len])
-  let contigTable = extractContigTable(hdrSlice)
-
-  let outFd: cint =
-    if cfg.toStdout: STDOUT_FILENO
-    else:
-      let fd = posix.open(cfg.outputPath.cstring,
-                          O_WRONLY or O_CREAT or O_TRUNC, 0o666.Mode)
-      if fd < 0:
-        stderr.writeLine "error: could not create output file: " & cfg.outputPath
-        quit(1)
-      fd
-
-  var hw = 0
-  while hw < gMergeHeader.len.int:
-    let n = posix.write(outFd, cast[pointer](addr gMergeHeader.buf[hw]),
-                        gMergeHeader.len.int - hw)
-    if n <= 0: break
-    hw += n
-
-  kWayMerge(relayReadFds, outFd, gMergeFormat, contigTable)
-
-  for fd in relayReadFds: discard posix.close(fd)
-  if not cfg.toStdout: discard posix.close(outFd)
-
-  var anyFailed = false
-  for fv in feederFvs:
-    if (^fv) != 0: anyFailed = true
-  if anyFailed: quit(1)

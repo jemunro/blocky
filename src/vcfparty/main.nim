@@ -170,7 +170,8 @@ proc runUsage() =
   quit(1)
 
 proc runRun(rawArgs: seq[string]) =
-  ## Parse run subcommand arguments and call runShards() or runShardsGather().
+  ## Parse `run` subcommand arguments, build a RunPipelineCfg, and dispatch
+  ## to run.runPipeline.
   ## Everything before the first --- is parsed as vcfparty options.
   ## Everything from --- onward is the pipeline stage definition.
   var firstSep = -1
@@ -278,6 +279,14 @@ proc runRun(rawArgs: seq[string]) =
   let (_, stages, termOp) = parseRunArgv(rawArgs)
   let hasBrace             = hasBracePlaceholder(stages)
 
+  var cfg = RunPipelineCfg(
+    vcfPath:     inputFile,
+    nShards:     nShards,
+    nThreads:    nThreads,
+    forceScan:   forceScan,
+    stages:      stages,
+    noKill:      noKill,
+    clampShards: clampShards)
   case termOp
   of topConcat:
     let isStdout = (outPrefix == "" or outPrefix == "/dev/stdout")
@@ -289,7 +298,7 @@ proc runRun(rawArgs: seq[string]) =
     if forceUncompress and not isStdout and gComp == compBgzf:
       stderr.writeLine "warning: -u forces uncompressed output but -o extension suggests compressed"
     let resolvedTmpDir = createTempDir("vcfparty_", "")
-    var cfg = GatherConfig(
+    var gcfg = GatherConfig(
       format:      gFmt,
       compression: finalComp,
       outputPath:  if isStdout: "" else: outPrefix,
@@ -297,39 +306,41 @@ proc runRun(rawArgs: seq[string]) =
       shardCount:  nShards,
       toStdout:    isStdout)
     if headerPatternSet:
-      cfg.headerPattern = some(headerPattern)
+      gcfg.headerPattern = some(headerPattern)
     if headerNSet:
-      cfg.headerN = some(headerN)
-    validateGatherConfig(cfg)
+      gcfg.headerN = some(headerN)
+    validateGatherConfig(gcfg)
     if not isStdout:
       warnFormatMismatch(inputFile, outPrefix)
-    runShardsGather(inputFile, nShards, outPrefix, nThreads, forceScan,
-                    stages, noKill, cfg, clampShards)
+    cfg.mode       = pmConcat
+    cfg.outputPath = outPrefix
+    cfg.toStdout   = isStdout
+    cfg.gather     = gcfg
   of topCollect:
     let isStdout = (outPrefix == "" or outPrefix == "/dev/stdout")
     if not isStdout:
       warnFormatMismatch(inputFile, outPrefix)
-    runShardsCollect(inputFile, nShards, outPrefix, nThreads, forceScan,
-                     stages, noKill, isStdout, clampShards)
+    cfg.mode       = pmCollect
+    cfg.outputPath = outPrefix
+    cfg.toStdout   = isStdout
   of topMerge:
     let isStdout = (outPrefix == "" or outPrefix == "/dev/stdout")
     if not isStdout:
       warnFormatMismatch(inputFile, outPrefix)
-    runShardsMerge(inputFile, nShards, outPrefix, nThreads, forceScan,
-                   stages, noKill, isStdout, clampShards)
+    cfg.mode       = pmMerge
+    cfg.outputPath = outPrefix
+    cfg.toStdout   = isStdout
   of topNone:
     let mode = inferRunMode(outPrefix != "", hasBrace)
-    case mode
-    of rmToolManaged:
-      if forceUncompress:
-        stderr.writeLine "error: -u cannot be used with tool-managed output ({}); vcfparty does not control that output"
-        quit(1)
-      runShards(inputFile, nShards, outPrefix, nThreads, forceScan,
-                stages, noKill, toolManaged = true, clampShards = clampShards)
-    of rmNormal:
+    if mode == rmToolManaged and forceUncompress:
+      stderr.writeLine "error: -u cannot be used with tool-managed output ({}); vcfparty does not control that output"
+      quit(1)
+    if mode == rmNormal:
       warnFormatMismatch(inputFile, outPrefix)
-      runShards(inputFile, nShards, outPrefix, nThreads, forceScan,
-                stages, noKill, clampShards = clampShards)
+    cfg.mode           = pmTool
+    cfg.outputTemplate = outPrefix
+    cfg.toolManaged    = (mode == rmToolManaged)
+  runPipeline(cfg)
 
 proc gatherUsage() =
   ## Print gather subcommand usage to stderr and exit 1.
