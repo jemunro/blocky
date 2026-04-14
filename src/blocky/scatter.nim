@@ -321,7 +321,7 @@ proc scatter*(vcfPath: string; nShards: int; outputTemplate: string;
       quit(1)
     if verbose:
       let rs = tasks[i].rawStart; let re = tasks[i].rawEnd
-      let bn = if i < nShards - 1: &", boundary head {tasks[i].boundaryHead.len} bytes"
+      let bn = if i < nShards - 1: &", append {tasks[i].boundaryHead.len} bytes"
                else: ""
       tasks[i].logLine = &"shard {i+1}/{nShards}: {outPath} " &
         &"(prepend {tasks[i].prepend.len}B, raw {rs}..{re} = {re-rs}B{bn})"

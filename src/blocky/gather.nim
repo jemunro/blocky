@@ -268,14 +268,15 @@ proc writeShardData*(outFile: File; bytes: seq[byte]; fmt: FileFormat;
         compressToBgzfMulti(outFile, tail)
       else:
         discard outFile.writeBytes(tail, 0, tail.len)
+    var decompBuf: seq[byte]
     while blockPos < bytes.len:
       let blkSize = bgzfBlockSize(bytes.toOpenArray(blockPos, bytes.high))
       if blkSize <= 0: break
       if compression == compBgzf:
         discard outFile.writeBytes(bytes, blockPos, blkSize)
       else:
-        let d = decompressBgzf(bytes.toOpenArray(blockPos, blockPos + blkSize - 1))
-        discard outFile.writeBytes(d, 0, d.len)
+        decompressBgzfInto(bytes.toOpenArray(blockPos, blockPos + blkSize - 1), decompBuf)
+        discard outFile.writeBytes(decompBuf, 0, decompBuf.len)
       blockPos += blkSize
   else:
     # Uncompressed path: strip headers, recompress if needed.
@@ -316,7 +317,8 @@ proc interceptShard*(shardIdx: int; inputFd: cint; tmpPath: string;
   ## Returns 0 on success, 1 on #CHROM mismatch.
   const ChunkSize = 65536
   const FlushThresh = 1 * 1024 * 1024
-  var readBuf = newSeqUninit[byte](ChunkSize)
+  var readBuf {.threadvar.}: seq[byte]
+  if readBuf.len < ChunkSize: readBuf = newSeqUninit[byte](ChunkSize)
 
   # Phase A: first read + format detection.
   let initRead = posix.read(inputFd, cast[pointer](addr readBuf[0]), ChunkSize)

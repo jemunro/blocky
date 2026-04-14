@@ -339,6 +339,7 @@ proc concatProc*(depositsPtr: ptr DepositQueue; outFd: cint;
       const BufSize = 65536
       var buf = newSeqUninit[byte](BufSize)
       var carry: seq[byte]
+      var decompBuf: seq[byte]
       while true:
         let n = posix.read(fd, addr buf[0], BufSize)
         if n <= 0: break
@@ -348,17 +349,21 @@ proc concatProc*(depositsPtr: ptr DepositQueue; outFd: cint;
           let blkSize = bgzfBlockSize(carry.toOpenArray(p, carry.high))
           if blkSize <= 0: break
           if p + blkSize > carry.len: break
-          let decompressed = decompressBgzf(carry.toOpenArray(p, p + blkSize - 1))
-          if decompressed.len > 0:
+          decompressBgzfInto(carry.toOpenArray(p, p + blkSize - 1), decompBuf)
+          if decompBuf.len > 0:
             var w = 0
-            while w < decompressed.len:
-              let nw = posix.write(outFd, unsafeAddr decompressed[w],
-                                   decompressed.len - w)
+            while w < decompBuf.len:
+              let nw = posix.write(outFd, unsafeAddr decompBuf[w],
+                                   decompBuf.len - w)
               if nw <= 0: break
               w += nw
           p += blkSize
         if p > 0:
-          carry = if p < carry.len: carry[p ..< carry.len] else: @[]
+          if p < carry.len:
+            moveMem(addr carry[0], addr carry[p], carry.len - p)
+            carry.setLen(carry.len - p)
+          else:
+            carry.setLen(0)
     else:
       # Copy fileSize - 28 bytes (skip trailing BGZF EOF block).
       let copySize = if fileSize >= 28: fileSize - 28 else: fileSize

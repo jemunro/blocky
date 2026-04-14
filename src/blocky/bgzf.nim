@@ -286,6 +286,30 @@ proc decompressBgzf*(data: openArray[byte]): seq[byte] =
   if ret != LIBDEFLATE_SUCCESS:
     quit(&"decompressBgzf: deflate_decompress returned {ret}", 1)
 
+proc decompressBgzfInto*(data: openArray[byte]; buf: var seq[byte]) =
+  ## Decompress the first BGZF block into buf, resizing as needed.
+  ## Reuses buf's allocation across calls — zero alloc in steady state.
+  ## Use for hot paths that decompress, write, and discard (no accumulation).
+  let blkSize = bgzfBlockSize(data)
+  if blkSize < 0:
+    quit("decompressBgzfInto: not a valid BGZF block header", 1)
+  let isize = leU32(data, blkSize - 4).int
+  if isize == 0:
+    buf.setLen(0)
+    return
+  if buf.len < isize:
+    buf = newSeqUninit[byte](isize)
+  let dcmp = getDecompressor()
+  let compLen = blkSize - BGZF_OVERHEAD
+  let ret = libdeflateDeflateDecompress(
+    dcmp,
+    unsafeAddr data[18], compLen.csize_t,
+    addr buf[0],          isize.csize_t,
+    nil)
+  if ret != LIBDEFLATE_SUCCESS:
+    quit(&"decompressBgzfInto: deflate_decompress returned {ret}", 1)
+  buf.setLen(isize)
+
 proc compressToBgzf*(data: openArray[byte]; level: int = 6): seq[byte] =
   ## Compress data into a single valid BGZF block using raw deflate.
   ## Compresses directly into the result buffer — single allocation, zero copies.
@@ -429,6 +453,7 @@ proc decompressCopyBytes*(srcPath: string; dst: File; start: int64; length: int6
   src.setFilePos(start)
   var cur = start
   let endAt = start + length
+  var decompBuf: seq[byte]
   # Reusable block buffer — grows to max block size, never shrinks.
   var blk = newSeqUninit[byte](BGZF_MAX_BLOCK_SIZE + BGZF_OVERHEAD)
   while cur + 18 <= endAt:
@@ -440,9 +465,9 @@ proc decompressCopyBytes*(srcPath: string; dst: File; start: int64; length: int6
     # Read remaining bytes after the 18-byte header already in blk.
     if blkSize > 18:
       if readBytes(src, blk, 18, blkSize - 18) < blkSize - 18: break
-    let decompressed = decompressBgzf(blk.toOpenArray(0, blkSize - 1))
-    if decompressed.len > 0:
-      discard dst.writeBytes(decompressed, 0, decompressed.len)
+    decompressBgzfInto(blk.toOpenArray(0, blkSize - 1), decompBuf)
+    if decompBuf.len > 0:
+      discard dst.writeBytes(decompBuf, 0, decompBuf.len)
     cur += blkSize.int64
 
 # ---------------------------------------------------------------------------
@@ -464,6 +489,7 @@ proc bgzfDecompressStream*(inFile, outFile: File) =
   ## Skips EOF blocks (ISIZE=0).  Uses thread-local decompressor and reusable
   ## block buffer (grows once, never shrinks).
   var blk = newSeqUninit[byte](BGZF_MAX_BLOCK_SIZE + BGZF_OVERHEAD)
+  var decompBuf: seq[byte]
   while true:
     let hdrRead = readBytes(inFile, blk, 0, 18)
     if hdrRead < 18: break
@@ -476,9 +502,9 @@ proc bgzfDecompressStream*(inFile, outFile: File) =
     # Skip EOF blocks (ISIZE = 0 in last 4 bytes).
     let isize = leU32(blk, blkSize - 4)
     if isize == 0: continue
-    let decompressed = decompressBgzf(blk.toOpenArray(0, blkSize - 1))
-    if decompressed.len > 0:
-      discard outFile.writeBytes(decompressed, 0, decompressed.len)
+    decompressBgzfInto(blk.toOpenArray(0, blkSize - 1), decompBuf)
+    if decompBuf.len > 0:
+      discard outFile.writeBytes(decompBuf, 0, decompBuf.len)
 
 # ---------------------------------------------------------------------------
 # Index parsing — TBI / CSI virtual offsets
