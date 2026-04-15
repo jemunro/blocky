@@ -100,7 +100,7 @@ proc doWriteShard*(task: ShardTask): int {.gcsafe.} =
   return 0
 
 # ---------------------------------------------------------------------------
-# Bounded scatter worker — atomic pull from shared task list
+# Bounded workers — atomic pull from shared task/boundary lists
 # ---------------------------------------------------------------------------
 
 var gScatterNext {.global.}: Atomic[int]
@@ -112,6 +112,31 @@ proc scatterWorker(tasksPtr: ptr seq[ShardTask]; nTotal: int): int {.gcsafe.} =
     let idx = gScatterNext.fetchAdd(1, moRelaxed)
     if idx >= nTotal: break
     discard doWriteShard(tasksPtr[][idx])
+  return 0
+
+type BoundarySplit = object
+  head:    seq[byte]   # BGZF for bytes [0 ..< uOff]
+  tail:    seq[byte]   # BGZF for bytes [uOff ..< len]
+  blkSize: int64       # total BGZF block size at this offset
+
+var gBoundaryNext {.global.}: Atomic[int]
+
+proc boundaryWorker(pathPtr: ptr string; voffsPtr: ptr seq[(int64, int)];
+                    splitsPtr: ptr seq[BoundarySplit];
+                    nTotal: int): int {.gcsafe.} =
+  ## Pull boundary indices atomically and split each boundary block.
+  ## Each worker opens its own fd to avoid seek contention.
+  let f = open(pathPtr[], fmRead)
+  defer: f.close()
+  while true:
+    let bi = gBoundaryNext.fetchAdd(1, moRelaxed)
+    if bi >= nTotal: break
+    let (off, uOff) = voffsPtr[][bi]
+    if uOff == 0:
+      splitsPtr[][bi].blkSize = readBgzfBlockSize(f, off)
+    else:
+      let (h, t, sz) = splitBgzfBlockBothSides(f, off, uOff)
+      splitsPtr[][bi] = BoundarySplit(head: h, tail: t, blkSize: sz)
   return 0
 
 # ---------------------------------------------------------------------------
@@ -240,30 +265,26 @@ proc computeShards*(vcfPath: string; nShards: int; nThreads: int = 1;
   let eofSeq: seq[byte] = @BGZF_EOF
   info(&"computeShards: {effN} shards, file size {fileSize} bytes, EOF at {eofStart}")
 
-  # Precompute every boundary-block split exactly once.  Each boundary is
+  # Precompute every boundary-block split in parallel.  Each boundary is
   # shared between shard i (uses .head as its boundaryHead) and shard i+1
   # (uses .tail as the start of its prepend), so doing it once per boundary
   # halves decompress + compress work at scatter boundaries.
-  # Also compute the first-shard tail split here if needed.
-  type BoundarySplit = object
-    head:    seq[byte]   # BGZF for bytes [0 ..< uOff]
-    tail:    seq[byte]   # BGZF for bytes [uOff ..< len]
-    blkSize: int64       # total BGZF block size at this offset
-  let fBoundary = open(vcfPath, fmRead)
-  defer: fBoundary.close()
   var splits = newSeq[BoundarySplit](boundaryVoffs.len)
-  for bi, voff in boundaryVoffs:
-    let (off, uOff) = voff
-    if uOff == 0:
-      splits[bi].blkSize = readBgzfBlockSize(fBoundary, off)
-    else:
-      let (h, t, sz) = splitBgzfBlockBothSides(fBoundary, off, uOff)
-      splits[bi] = BoundarySplit(head: h, tail: t, blkSize: sz)
+  if boundaryVoffs.len > 0:
+    gBoundaryNext.store(0, moRelaxed)
+    let nWorkers = min(nThreads, boundaryVoffs.len)
+    var bfvs = newSeq[FlowVar[int]](nWorkers)
+    for i in 0 ..< nWorkers:
+      bfvs[i] = spawn boundaryWorker(unsafeAddr vcfPath, addr boundaryVoffs,
+                                      addr splits, boundaryVoffs.len)
+    for fv in bfvs: discard ^fv
   # First-shard tail split (used only when firstUOff > 0 — typical for BCF).
   var firstShardTail: seq[byte]
   var firstBlkSize: int64
   if firstUOff > 0:
-    let (_, t, sz) = splitBgzfBlockBothSides(fBoundary, firstBlockOff, firstUOff)
+    let f = open(vcfPath, fmRead)
+    let (_, t, sz) = splitBgzfBlockBothSides(f, firstBlockOff, firstUOff)
+    f.close()
     firstShardTail = t
     firstBlkSize = sz
 
@@ -335,11 +356,12 @@ proc scatter*(vcfPath: string; nShards: int; outputTemplate: string;
       stderr.writeLine &"error: could not create output file: {outPath}"
       quit(1)
     if verbose:
-      let rs = tasks[i].rawStart; let re = tasks[i].rawEnd
-      let bn = if i < nShards - 1: &", append {tasks[i].boundaryHead.len} bytes"
-               else: ""
+      let pre = tasks[i].prepend.len
+      let raw = tasks[i].rawEnd - tasks[i].rawStart
+      let app = tasks[i].boundaryHead.len
+      let total = pre.int64 + raw + app.int64 + tasks[i].eofSeq.len.int64
       tasks[i].logLine = &"shard {i+1}/{nShards}: {outPath} " &
-        &"(prepend {tasks[i].prepend.len}B, raw {rs}..{re} = {re-rs}B{bn})"
+        &"(prepend: {pre}B, raw: {raw}B, append: {app}B, total: {total}B)"
   if actualThreads > 1:
     gScatterNext.store(0, moRelaxed)
     let nWorkers = min(actualThreads, nShards)

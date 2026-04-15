@@ -342,35 +342,54 @@ proc decompressBgzfInto*(data: openArray[byte]; buf: var seq[byte]) =
     quit(&"decompressBgzfInto: deflate_decompress returned {ret}", 1)
   buf.setLen(isize)
 
+# ---------------------------------------------------------------------------
+# Thread-local BGZF compression buffer — shared by all compress functions.
+# Fixed size covers the worst-case BGZF block (65536 input + deflate overhead).
+# BGZF header template is written once on first allocation and never touched again.
+# ---------------------------------------------------------------------------
+
+const TL_COMPRESS_BUF_SIZE = 66560  # 65 KiB — fits any BGZF block
+var tlCompressBuf {.threadvar.}: seq[byte]
+var tlCompressBufReady {.threadvar.}: bool
+
+proc ensureCompressBuf() {.inline.} =
+  if not tlCompressBufReady:
+    tlCompressBuf = newSeqUninit[byte](TL_COMPRESS_BUF_SIZE)
+    tlCompressBuf[0] = 0x1f; tlCompressBuf[1] = 0x8b
+    tlCompressBuf[2] = 0x08; tlCompressBuf[3] = 0x04
+    tlCompressBuf[4] = 0; tlCompressBuf[5] = 0
+    tlCompressBuf[6] = 0; tlCompressBuf[7] = 0
+    tlCompressBuf[8] = 0; tlCompressBuf[9] = 0xff
+    putLeU16(tlCompressBuf, 10, 6'u16)
+    tlCompressBuf[12] = 0x42; tlCompressBuf[13] = 0x43
+    putLeU16(tlCompressBuf, 14, 2'u16)
+    tlCompressBufReady = true
+
+proc compressBlockInto(cmp: pointer; data: pointer; dataLen: int): int {.inline.} =
+  ## Compress one chunk into tlCompressBuf (header already set).
+  ## Returns the total BGZF block size.
+  let cdataLen = libdeflateDeflateCompress(
+    cmp, data, dataLen.csize_t,
+    addr tlCompressBuf[18], (TL_COMPRESS_BUF_SIZE - BGZF_OVERHEAD).csize_t).int
+  if cdataLen == 0:
+    quit("compressBlockInto: deflate_compress failed", 1)
+  let totalSize = BGZF_OVERHEAD + cdataLen
+  putLeU16(tlCompressBuf, 16, uint16(totalSize - 1))   # BSIZE - 1
+  let crc = libdeflateCrc32(0'u32, data, dataLen.csize_t)
+  putLeU32(tlCompressBuf, 18 + cdataLen, crc.uint32)   # CRC32
+  putLeU32(tlCompressBuf, 18 + cdataLen + 4, dataLen.uint32)  # ISIZE
+  return totalSize
+
 proc compressToBgzf*(data: openArray[byte]; level: int = 6): seq[byte] =
-  ## Compress data into a single valid BGZF block using raw deflate.
-  ## Compresses directly into the result buffer — single allocation, zero copies.
+  ## Compress data into a single BGZF block.  Returns a new seq.
   ## data.len must be <= BGZF_MAX_BLOCK_SIZE (65536).
-  ## Reuses a thread-local compressor cached by level.
   if data.len > BGZF_MAX_BLOCK_SIZE:
     quit(&"compressToBgzf: input too large ({data.len} > {BGZF_MAX_BLOCK_SIZE})", 1)
+  ensureCompressBuf()
   let cmp = getCompressor(level)
-  let bound = libdeflateDeflateCompressBound(cmp, data.len.csize_t).int
-  # Allocate result at max possible size; compress directly into payload area.
-  result = newSeqUninit[byte](BGZF_OVERHEAD + bound)
-  result[0] = 0x1f; result[1] = 0x8b; result[2] = 0x08; result[3] = 0x04
-  result[4] = 0x00; result[5] = 0x00; result[6] = 0x00; result[7] = 0x00
-  result[8] = 0x00; result[9] = 0xff
-  putLeU16(result, 10, 6'u16)
-  result[12] = 0x42; result[13] = 0x43
-  putLeU16(result, 14, 2'u16)
-  # Compress directly into result[18..] — no temp buffer, no copy.
   let inPtr = if data.len > 0: unsafeAddr data[0] else: nil
-  let cdataLen = libdeflateDeflateCompress(
-    cmp, inPtr, data.len.csize_t, addr result[18], bound.csize_t).int
-  if cdataLen == 0:
-    quit("compressToBgzf: deflate_compress failed", 1)
-  let totalSize = BGZF_OVERHEAD + cdataLen
-  putLeU16(result, 16, uint16(totalSize - 1))        # BSIZE - 1
-  let crc = libdeflateCrc32(0'u32, inPtr, data.len.csize_t)
-  putLeU32(result, 18 + cdataLen,     crc.uint32)    # CRC32
-  putLeU32(result, 18 + cdataLen + 4, data.len.uint32)  # ISIZE
-  result.setLen(totalSize)                            # shrink to actual
+  let totalSize = compressBlockInto(cmp, inPtr, data.len)
+  result = tlCompressBuf[0 ..< totalSize]
 
 proc compressToBgzfMulti*(data: openArray[byte]; level: int = 6): seq[byte] =
   ## Compress data into one or more BGZF blocks, splitting every 65536 bytes.
@@ -385,46 +404,20 @@ proc compressToBgzfMulti*(data: openArray[byte]; level: int = 6): seq[byte] =
     result.add(compressToBgzf(data[pos ..< chunkEnd], level))
     pos = chunkEnd
 
-var tlCompressBuf {.threadvar.}: seq[byte]
-  ## Thread-local reusable buffer for compressToBgzfMulti File overload.
-
 proc compressToBgzfMulti*(outFile: File; data: openArray[byte]; level: int = 6) =
   ## Compress data into BGZF blocks and write directly to outFile.
-  ## Zero per-call allocation — uses thread-local reusable buffer.
+  ## Zero per-call allocation — compresses into thread-local buffer and writes.
   if data.len == 0:
     let z = compressToBgzf(data, level)
     discard outFile.writeBytes(z, 0, z.len)
     return
+  ensureCompressBuf()
   let cmp = getCompressor(level)
   var pos = 0
   while pos < data.len:
     let chunkEnd = min(pos + BGZF_MAX_BLOCK_SIZE, data.len)
     let chunkLen = chunkEnd - pos
-    let bound = libdeflateDeflateCompressBound(cmp, chunkLen.csize_t).int
-    let maxBlock = BGZF_OVERHEAD + bound
-    if tlCompressBuf.len < maxBlock:
-      tlCompressBuf = newSeqUninit[byte](maxBlock)
-    # BGZF header.
-    tlCompressBuf[0] = 0x1f; tlCompressBuf[1] = 0x8b
-    tlCompressBuf[2] = 0x08; tlCompressBuf[3] = 0x04
-    tlCompressBuf[4] = 0; tlCompressBuf[5] = 0
-    tlCompressBuf[6] = 0; tlCompressBuf[7] = 0
-    tlCompressBuf[8] = 0; tlCompressBuf[9] = 0xff
-    putLeU16(tlCompressBuf, 10, 6'u16)
-    tlCompressBuf[12] = 0x42; tlCompressBuf[13] = 0x43
-    putLeU16(tlCompressBuf, 14, 2'u16)
-    # Compress directly into buffer payload.
-    let inPtr = unsafeAddr data[pos]
-    let cdataLen = libdeflateDeflateCompress(
-      cmp, inPtr, chunkLen.csize_t,
-      addr tlCompressBuf[18], bound.csize_t).int
-    if cdataLen == 0:
-      quit("compressToBgzfMulti: deflate_compress failed", 1)
-    let totalSize = BGZF_OVERHEAD + cdataLen
-    putLeU16(tlCompressBuf, 16, uint16(totalSize - 1))
-    let crc = libdeflateCrc32(0'u32, inPtr, chunkLen.csize_t)
-    putLeU32(tlCompressBuf, 18 + cdataLen, crc.uint32)
-    putLeU32(tlCompressBuf, 18 + cdataLen + 4, chunkLen.uint32)
+    let totalSize = compressBlockInto(cmp, unsafeAddr data[pos], chunkLen)
     discard outFile.writeBytes(tlCompressBuf, 0, totalSize)
     pos = chunkEnd
 
