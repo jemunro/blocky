@@ -17,7 +17,8 @@ proc warnFormatMismatch(inputPath: string; outputPath: string) =
     stderr.writeLine "warning: input and output formats differ; " &
       "format conversion is the pipeline's responsibility"
 
-const VERSION = "0.1.0"
+const NimblePkgVersion {.strdefine.} = "dev"
+const VERSION = NimblePkgVersion
 
 proc usage() =
   ## Print top-level usage to stderr and exit 1.

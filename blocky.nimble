@@ -1,5 +1,5 @@
 # Package
-version     = "0.1.0"
+version     = "26.04.0-rc.1"
 author      = "munro.j"
 description = "Parallel processing of bgzipped files"
 license     = "MIT"
