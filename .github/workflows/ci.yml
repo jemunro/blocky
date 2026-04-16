@@ -26,7 +26,7 @@ jobs:
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Install dependencies
-        run: mamba install -y -c bioconda -c conda-forge bcftools tabix cmake 'nim>=2.0'
+        run: mamba install -y -c bioconda -c conda-forge bcftools tabix cmake make c-compiler 'nim>=2.2.6'
 
       - name: Cache vendor
         uses: actions/cache@v4
