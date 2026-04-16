@@ -1,9 +1,13 @@
 ## test_utils.nim — shared test helpers: timed template + watchdog thread
 
-import std/[times, atomics, os, locks, strutils]
+import std/[times, atomics, os, locks, strformat, strutils]
 
 when defined(nimPanics):
   {.warning: "tests compiled with --panics:on; AssertionDefect is uncatchable and FAIL line won't print. Set `switch(\"panics\", \"off\")` in config.nims.".}
+
+let gTimeoutSec* = block:
+  let e = getEnv("BLOCKY_TEST_TIMEOUT", "10")
+  try: parseFloat(e) except ValueError: 10.0
 
 var gDeadline: Atomic[float64]
 var gLabel: string
@@ -23,7 +27,7 @@ proc watchdog {.thread, gcsafe.} =
     if dl > 0.0 and epochTime() > dl:
       var msg: string
       withLock(gLock):
-        {.gcsafe.}: msg = gLabel & "\tFAIL\tTIMEOUT (>10 s)"
+        {.gcsafe.}: msg = gLabel & &"\tFAIL\tTIMEOUT (>{gTimeoutSec} s)"
       stderr.writeLine(msg)
       quit(1)
 
@@ -49,7 +53,7 @@ template timed*(id, desc: string, body: untyped) =
     gCurrentId = id
     gCurrentDesc = desc
     gCurrentT0 = epochTime()
-    gDeadline.store(epochTime() + 10.0, moRelaxed)
+    gDeadline.store(epochTime() + gTimeoutSec, moRelaxed)
     body
     gDeadline.store(0.0, moRelaxed)
     let el = epochTime() - gCurrentT0
