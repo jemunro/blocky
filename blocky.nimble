@@ -24,7 +24,8 @@ proc buildLibdeflate() =
     mkDir "vendor"
     let tarball = "vendor/libdeflate-" & LibdeflateVer & ".tar.gz"
     if not fileExists(tarball):
-      exec "curl -fsSL " & LibdeflateUrl & " -o " & tarball
+      exec "(curl -fsSL " & LibdeflateUrl & " -o " & tarball &
+           " 2>/dev/null || wget -qO " & tarball & " " & LibdeflateUrl & ")"
     exec "tar -xz -C vendor -f " & tarball
     exec "cmake -B " & LibdeflateDir & "/build -S " & LibdeflateDir &
          " -DLIBDEFLATE_BUILD_SHARED_LIBS=OFF -DLIBDEFLATE_BUILD_GZIP=OFF" &
