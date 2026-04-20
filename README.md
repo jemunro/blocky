@@ -6,7 +6,7 @@ Parallelise processing of bgzipped files by splitting along BGZF block boundarie
 
 ## How it works
 
-A bgzipped file is a sequence of independent BGZF blocks, each containing up to 64 KiB of uncompressed data. Because blocks are self-contained, any block boundary is a valid split point — the file can be divided into shards without decompressing the data in between.
+A bgzipped file is a sequence of independent BGZF blocks, each containing up to 64 KiB of uncompressed data. Because blocks are self-contained, any block boundary is a valid split point -- the file can be divided into shards without decompressing the data in between.
 
 blocky uses the tabix (TBI), CSI, or GZI index to obtain block offsets, then splits the file at those boundaries. Each shard receives a recompressed header and a recompressed boundary block; the blocks in between are byte-copied directly from disk without decompression.
 
@@ -16,16 +16,36 @@ Only one block per split point is ever decompressed and recompressed. For a file
 
 ## Installation
 
+### Precompiled binary (recommended)
+
+Download the latest Linux x86_64 binary from the [latest release](https://github.com/jemunro/blocky/releases/latest):
+
 ```bash
-# Requires Nim >= 2.0 and cmake (used once to build the vendored compression library)
-git clone https://github.com/jemunro/blocky
-cd blocky
-nimble release
+curl -fsSL https://github.com/jemunro/blocky/releases/latest/download/blocky -o blocky
+chmod +x blocky
+mv blocky /usr/local/bin/  # or anywhere on your PATH
 ```
 
-The first build downloads and compiles libdeflate automatically. Subsequent builds skip that step. Tools like `bcftools` are runtime dependencies for pipeline use but not needed at build time.
+### Docker images
 
-For offline or HPC use, place `vendor/libdeflate-1.25.tar.gz` in the repo before running `nimble release` to skip the download.
+Pre-built images with common bioinformatics tools are available from GHCR:
+
+```bash
+docker pull ghcr.io/jemunro/blocky/blocky-bcftools:latest
+docker pull ghcr.io/jemunro/blocky/blocky-vcfanno:latest
+```
+
+### Build from source
+
+Requires Nim >= 2.0, cmake, and a C compiler.
+
+```bash
+git clone --recurse-submodules https://github.com/jemunro/blocky
+cd blocky
+nimble release    # -> produces ./blocky
+```
+
+libdeflate is vendored as a git submodule and built automatically on the first compile. Subsequent builds skip that step.
 
 ---
 
@@ -167,16 +187,16 @@ cat data.vcf | blocky compress -c | blocky decompress -c  # pipe mode
 
 Errors if the output file already exists. Warns if compressing an already-compressed file or decompressing a non-compressed file.
 
-These subcommands are included for convenience (e.g. on systems without htslib). If `bgzip` is available, prefer it — it is multithreaded and better optimised for large files.
+These subcommands are included for convenience (e.g. on systems without htslib). If `bgzip` is available, prefer it -- it is multithreaded and better optimised for large files.
 
 ---
 
 ## `{}` placeholder and `--discard`
 
-`{}` in the tool command is replaced with the zero-padded shard number. This works in all modes — you can use `{}` for auxiliary output files (reports, logs) while still capturing stdout via `-o`.
+`{}` in the tool command is replaced with the zero-padded shard number. This works in all modes -- you can use `{}` for auxiliary output files (reports, logs) while still capturing stdout via `-o`.
 
 ```bash
-# Tool manages its own output files — use --discard to drop stdout
+# Tool manages its own output files -- use --discard to drop stdout
 blocky run -n 8 --discard input.vcf.gz \
   ::: bcftools view -Oz -o output.{}.vcf.gz
 
@@ -235,7 +255,7 @@ blocky run -n 8 -o out.vcf.gz input.vcf.gz \
 
 ## Performance
 
-- Middle BGZF blocks are byte-copied at disk bandwidth — no decompression
+- Middle BGZF blocks are byte-copied at disk bandwidth -- no decompression
 - Only N-1 boundary blocks are decompressed per scatter (one per split point)
 - Worker pool model: `-n` workers pull from a shared shard queue, keeping all cores busy even when shard processing times vary
 - Tmp shard files are BGZF-compressed (saves disk), decompressed on-the-fly during concat if `-u` is set
@@ -248,18 +268,35 @@ blocky run -n 8 -o out.vcf.gz input.vcf.gz \
 - BCF requires a CSI index (`bcftools index input.bcf`). No scan fallback for BCF.
 - Tools must read from stdin and write to stdout (or use `{}` for tool-managed output).
 - Format conversion (VCF <-> BCF) is the pipeline's responsibility.
-- BAM/CRAM are explicitly not supported — reads span block boundaries, making block-level splitting produce incorrect results.
+- BAM/CRAM are explicitly not supported -- reads span block boundaries, making block-level splitting produce incorrect results.
 
 ---
 
-## Development
+## Contributing
+
+Pull requests are welcome. Please follow these guidelines:
+
+- **CI must pass.** All PRs run the test suite automatically via GitHub Actions.
+- **Add tests for new features.** New functionality should include tests in the appropriate `tests/test_*.nim` file. Bug fixes should add a regression test where practical.
+- **Run tests locally before pushing:** `nimble test` (requires `bcftools`, `bgzip`, and `tabix` on `PATH`).
+- **Keep changes focused.** One feature or fix per PR. Avoid unrelated refactoring in the same PR.
+- **No new dependencies** without prior discussion.
+
+### Building from source
 
 ```bash
-nimble release          # build
-nimble test             # run all tests (requires bcftools, bgzip, tabix)
-bash tests/generate_fixtures.sh  # regenerate test fixtures
+git clone --recurse-submodules https://github.com/jemunro/blocky
+cd blocky
+nimble build              # debug build
+nimble release            # release build (optimised, stripped)
+nimble test               # run all tests
+nim c -r tests/test_scatter.nim   # run a single test file
 ```
+
+**Build requirements:** Nim >= 2.0, cmake, a C compiler (gcc or clang).
+
+**Test requirements:** `bcftools`, `bgzip`, `tabix` (from htslib). Test fixtures are generated automatically on first run via `tests/generate_fixtures.sh`.
 
 ---
 
-Blocky started as a Python prototype and was built into a portable, statically-linked Nim binary using [Claude Code](https://claude.com/product/claude-code).
+Blocky started as a Python prototype and was built into a portable, statically-linked Nim binary using [Claude Code](https://claude.ai/code).
