@@ -7,9 +7,6 @@
 ##   4. Executing per-shard pipelines via a bounded worker pool.
 
 import std/[atomics, cpuinfo, os, posix, sequtils, strformat, strutils, tempfiles]
-{.warning[Deprecated]: off.}
-import std/threadpool
-{.warning[Deprecated]: on.}
 import scatter
 import bgzf
 import gather
@@ -233,33 +230,60 @@ var gShardsWithOutput* {.global.}: Atomic[int]
   ## Incremented by interceptors that receive at least one byte of stdout.
   ## Checked after run completes when {} is present without --discard.
 
-proc workerProc*(tasksPtr: ptr seq[ShardTask]; nTotalShards: int;
-                 stagesPtr: ptr seq[seq[string]]; tmpDirPtr: ptr string;
-                 depositsPtr: ptr DepositQueue; chromBufPtr: ptr SharedBuf;
-                 discardStdout: bool; discardStderr: bool; noKill: bool;
-                 outFd: cint; forceUncompress: bool;
-                 outputCounterPtr: ptr Atomic[int]): int {.gcsafe.} =
+type InterceptArgs = object
+  shardIdx: int
+  inputFd: cint
+  tmpPath: string
+  chromBufPtr: ptr SharedBuf
+  directFd: cint
+  directUncompress: bool
+  compressLevel: int
+  outputCounter: ptr Atomic[int]
+  rc: ptr Atomic[int]
+
+proc interceptThread(args: InterceptArgs) {.thread.} =
+  let rc = interceptShard(args.shardIdx, args.inputFd, args.tmpPath,
+                          args.chromBufPtr, args.directFd,
+                          args.directUncompress, args.compressLevel,
+                          args.outputCounter)
+  args.rc[].store(rc, moRelease)
+
+type WorkerArgs* = object
+  tasksPtr*: ptr seq[ShardTask]
+  nTotalShards*: int
+  stagesPtr*: ptr seq[seq[string]]
+  tmpDirPtr*: ptr string
+  depositsPtr*: ptr DepositQueue
+  chromBufPtr*: ptr SharedBuf
+  discardStdout*: bool
+  discardStderr*: bool
+  noKill*: bool
+  outFd*: cint
+  forceUncompress*: bool
+  outputCounterPtr*: ptr Atomic[int]
+
+proc workerThread*(args: WorkerArgs) {.thread.} =
   ## Worker loop: atomically pull shard indices from gNextShard, fork a
   ## subprocess for each, write decompressed shard data to its stdin,
   ## intercept stdout (strip headers, BGZF-compress) to a tmp file,
   ## and deposit the path to the concat queue.
   ## Shard 0 writes directly to outFd when outFd >= 0.
   while true:
-    if gAnyFailed.load(moRelaxed) and not noKill:
+    if gAnyFailed.load(moRelaxed) and not args.noKill:
       break
     let idx = gNextShard.fetchAdd(1, moRelaxed)
-    if idx >= nTotalShards:
+    if idx >= args.nTotalShards:
       break
 
     var tmpPath: string
-    if not discardStdout:
-      tmpPath = tmpDirPtr[] / &"shard_{idx}.tmp"
+    if not args.discardStdout:
+      tmpPath = args.tmpDirPtr[] / &"shard_{idx}.tmp"
 
     # Subprocess stdout goes to a pipe (interceptor reads the other end)
     # or /dev/null for tool-managed mode.
     var stdoutFd: cint
     var stdoutPipeR: cint = -1
-    if discardStdout:
+    if args.discardStdout:
       stdoutFd = posix.open("/dev/null".cstring, O_WRONLY)
       if stdoutFd < 0:
         stderr.writeLine &"error: could not open /dev/null for shard {idx + 1}"
@@ -290,35 +314,40 @@ proc workerProc*(tasksPtr: ptr seq[ShardTask]; nTotalShards: int;
 
     # Fork subprocess.
     var stderrFd: cint = -1
-    if discardStderr:
+    if args.discardStderr:
       stderrFd = posix.open("/dev/null".cstring, O_WRONLY)
       if stderrFd >= 0:
         discard posix.fcntl(stderrFd, F_SETFD, FD_CLOEXEC)
-    let shardCmd = buildShellCmdForShard(stagesPtr[], idx, nTotalShards)
-    info(&"shard {idx + 1}/{nTotalShards}: {shardCmd}")
+    let shardCmd = buildShellCmdForShard(args.stagesPtr[], idx, args.nTotalShards)
+    info(&"shard {idx + 1}/{args.nTotalShards}: {shardCmd}")
     let pid = forkExecSh(stdinPipe[0], stdinPipe[1], stdoutFd, shardCmd, idx,
                           stderrFd)
     discard posix.close(stdinPipe[0])
     discard posix.close(stdoutFd)
     if stderrFd >= 0: discard posix.close(stderrFd)
 
-    # Spawn interceptor thread (reads subprocess stdout, writes tmp/output).
-    var interceptFv: FlowVar[int]
-    if not discardStdout:
-      if idx == 0 and outFd >= 0:
-        interceptFv = spawn interceptShard(idx, stdoutPipeR, tmpPath, chromBufPtr,
-                                            outFd, forceUncompress,
-                                            outputCounter = outputCounterPtr)
-      elif forceUncompress:
-        interceptFv = spawn interceptShard(idx, stdoutPipeR, tmpPath, chromBufPtr,
-                                            compressLevel = 1,
-                                            outputCounter = outputCounterPtr)
-      else:
-        interceptFv = spawn interceptShard(idx, stdoutPipeR, tmpPath, chromBufPtr,
-                                            outputCounter = outputCounterPtr)
+    # Create interceptor thread (reads subprocess stdout, writes tmp/output).
+    # Using createThread instead of threadpool avoids pool-capacity starvation
+    # and fork()+threadpool deadlocks.
+    var iThread: Thread[InterceptArgs]
+    var iRc: Atomic[int]
+    iRc.store(0, moRelaxed)
+    if not args.discardStdout:
+      var iArgs = InterceptArgs(shardIdx: idx, inputFd: stdoutPipeR,
+                                tmpPath: tmpPath, chromBufPtr: args.chromBufPtr,
+                                directFd: -1, directUncompress: false,
+                                compressLevel: 6,
+                                outputCounter: args.outputCounterPtr,
+                                rc: addr iRc)
+      if idx == 0 and args.outFd >= 0:
+        iArgs.directFd = args.outFd
+        iArgs.directUncompress = args.forceUncompress
+      elif args.forceUncompress:
+        iArgs.compressLevel = 1
+      createThread(iThread, interceptThread, iArgs)
 
     # Write decompressed shard data to subprocess stdin (synchronous).
-    var task = tasksPtr[][idx]
+    var task = args.tasksPtr[][idx]
     task.outFd = stdinPipe[1]
     task.decompress = true
     discard doWriteShard(task)
@@ -333,29 +362,32 @@ proc workerProc*(tasksPtr: ptr seq[ShardTask]; nTotalShards: int;
       gAnyFailed.store(true, moRelease)
 
     # Wait for interceptor to finish writing tmp file.
-    if not discardStdout:
-      let interceptRc = ^interceptFv
-      if interceptRc != 0:
+    if not args.discardStdout:
+      joinThread(iThread)
+      if iRc.load(moRelaxed) != 0:
         gAnyFailed.store(true, moRelease)
 
     # Deposit tmp path for concat thread (sentinel "" for shard 0 direct write).
-    if not discardStdout:
-      let depositPath = if idx == 0 and outFd >= 0: "" else: tmpPath
-      depositsPtr[].deposit(idx, depositPath)
-
-  result = 0
+    if not args.discardStdout:
+      let depositPath = if idx == 0 and args.outFd >= 0: "" else: tmpPath
+      args.depositsPtr[].deposit(idx, depositPath)
 
 # ---------------------------------------------------------------------------
 # Concat thread — appends tmp files to output fd in shard order
 # ---------------------------------------------------------------------------
 
-proc concatProc*(depositsPtr: ptr DepositQueue; outFd: cint;
-                 nTotalShards: int; forceUncompress: bool): int {.gcsafe.} =
+type ConcatArgs* = object
+  depositsPtr*: ptr DepositQueue
+  outFd*: cint
+  nTotalShards*: int
+  forceUncompress*: bool
+
+proc concatThread*(args: ConcatArgs) {.thread.} =
   ## Wait for each shard's BGZF tmp file in order, copy to outFd, delete.
   ## Skips trailing 28-byte BGZF EOF from each tmp; writes single EOF at end.
   ## If forceUncompress: decompresses BGZF before writing (for -u flag).
-  for i in 0 ..< nTotalShards:
-    let tmpPath = depositsPtr[].waitFor(i)
+  for i in 0 ..< args.nTotalShards:
+    let tmpPath = args.depositsPtr[].waitFor(i)
     if tmpPath.len == 0:
       continue  # shard 0 wrote directly to outFd
     let fd = posix.open(tmpPath.cstring, O_RDONLY)
@@ -365,7 +397,7 @@ proc concatProc*(depositsPtr: ptr DepositQueue; outFd: cint;
     var st: Stat
     discard fstat(fd, st)
     let fileSize = st.st_size
-    if forceUncompress:
+    if args.forceUncompress:
       # Decompress BGZF blocks and write raw bytes.
       const BufSize = 65536
       var buf = newSeqUninit[byte](BufSize)
@@ -384,7 +416,7 @@ proc concatProc*(depositsPtr: ptr DepositQueue; outFd: cint;
           if decompBuf.len > 0:
             var w = 0
             while w < decompBuf.len:
-              let nw = posix.write(outFd, unsafeAddr decompBuf[w],
+              let nw = posix.write(args.outFd, unsafeAddr decompBuf[w],
                                    decompBuf.len - w)
               if nw <= 0: break
               w += nw
@@ -398,18 +430,17 @@ proc concatProc*(depositsPtr: ptr DepositQueue; outFd: cint;
     else:
       # Copy fileSize - 28 bytes (skip trailing BGZF EOF block).
       let copySize = if fileSize >= 28: fileSize - 28 else: fileSize
-      copyRange(outFd, fd, copySize)
+      copyRange(args.outFd, fd, copySize)
     discard posix.close(fd)
     try: removeFile(tmpPath) except OSError: discard
 
   # Write single BGZF EOF block at the end (unless -u).
-  if not forceUncompress:
+  if not args.forceUncompress:
     var w = 0
     while w < BGZF_EOF.len:
-      let n = posix.write(outFd, unsafeAddr BGZF_EOF[w], BGZF_EOF.len - w)
+      let n = posix.write(args.outFd, unsafeAddr BGZF_EOF[w], BGZF_EOF.len - w)
       if n <= 0: break
       w += n
-  result = 0
 
 # ---------------------------------------------------------------------------
 # Public entry point
@@ -454,9 +485,6 @@ proc runPipeline*(cfg: RunPipelineCfg) =
   gNextShard.store(0, moRelaxed)
   gAnyFailed.store(false, moRelaxed)
   gShardsWithOutput.store(0, moRelaxed)
-  # Workers need pool slots for: worker thread + interceptor thread each,
-  # plus 1 for the concat thread.
-  setMaxPoolSize(nWorkers * 2 + 1)
 
   # Allocate shared #CHROM validation buffer.
   let chromBuf = cast[ptr SharedBuf](allocShared0(sizeof(SharedBuf)))
@@ -473,34 +501,39 @@ proc runPipeline*(cfg: RunPipelineCfg) =
         stderr.writeLine "error: could not create output file: " & cfg.outputPath
         quit(1)
 
-  # Spawn concat thread (unless tool-managed).
+  # Start concat thread (unless tool-managed).
   if cfg.discardStdout: info("run: --discard mode, no concat thread")
   elif cfg.toStdout: info("run: concat to stdout")
   else: info(&"run: concat to {cfg.outputPath}")
   var deposits = if cfg.discardStdout: DepositQueue() else: newDepositQueue(nShards)
-  var concatFv: FlowVar[int]
+  var cThread: Thread[ConcatArgs]
   if not cfg.discardStdout:
-    concatFv = spawn concatProc(addr deposits, outFd, nShards,
-                                 cfg.forceUncompress)
+    createThread(cThread, concatThread,
+                 ConcatArgs(depositsPtr: addr deposits, outFd: outFd,
+                            nTotalShards: nShards,
+                            forceUncompress: cfg.forceUncompress))
 
-  # Spawn worker threads.
+  # Start worker threads.
   var stages = cfg.stages
-  var workerFvs = newSeq[FlowVar[int]](nWorkers)
   let counterPtr = if cfg.warnBraceNoDiscard: addr gShardsWithOutput else: nil
+  let wArgs = WorkerArgs(tasksPtr: addr tasks, nTotalShards: nShards,
+                         stagesPtr: addr stages, tmpDirPtr: unsafeAddr tmpDir,
+                         depositsPtr: addr deposits, chromBufPtr: chromBuf,
+                         discardStdout: cfg.discardStdout,
+                         discardStderr: cfg.discardStderr, noKill: cfg.noKill,
+                         outFd: outFd, forceUncompress: cfg.forceUncompress,
+                         outputCounterPtr: counterPtr)
+  var wThreads = newSeq[Thread[WorkerArgs]](nWorkers)
   for i in 0 ..< nWorkers:
-    workerFvs[i] = spawn workerProc(addr tasks, nShards, addr stages,
-                                     unsafeAddr tmpDir, addr deposits,
-                                     chromBuf, cfg.discardStdout,
-                                     cfg.discardStderr, cfg.noKill,
-                                     outFd, cfg.forceUncompress, counterPtr)
+    createThread(wThreads[i], workerThread, wArgs)
 
   # Wait for all workers to finish.
-  for fv in workerFvs:
-    discard ^fv
+  for i in 0 ..< nWorkers:
+    joinThread(wThreads[i])
 
   # Wait for concat thread to finish.
   if not cfg.discardStdout:
-    discard ^concatFv
+    joinThread(cThread)
     freeDepositQueue(deposits)
     if not cfg.toStdout:
       discard posix.close(outFd)

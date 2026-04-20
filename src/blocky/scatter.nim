@@ -8,9 +8,6 @@
 ## block splitting — lives in `bgzf`.
 
 import std/[algorithm, atomics, cpuinfo, os, posix, sequtils, strformat, strutils]
-{.warning[Deprecated]: off.}
-import std/threadpool
-{.warning[Deprecated]: on.}
 import bgzf
 
 # ---------------------------------------------------------------------------
@@ -101,14 +98,17 @@ proc doWriteShard*(task: ShardTask): int {.gcsafe.} =
 
 var gScatterNext {.global.}: Atomic[int]
 
-proc scatterWorker(tasksPtr: ptr seq[ShardTask]; nTotal: int): int {.gcsafe.} =
+type ScatterWorkerArgs = object
+  tasksPtr: ptr seq[ShardTask]
+  nTotal: int
+
+proc scatterWorkerThread(args: ScatterWorkerArgs) {.thread.} =
   ## Pull shard indices atomically and write each shard.  Exactly nWorkers
   ## of these run concurrently, bounding I/O concurrency on the input file.
   while true:
     let idx = gScatterNext.fetchAdd(1, moRelaxed)
-    if idx >= nTotal: break
-    discard doWriteShard(tasksPtr[][idx])
-  return 0
+    if idx >= args.nTotal: break
+    discard doWriteShard(args.tasksPtr[][idx])
 
 type BoundarySplit = object
   head:    seq[byte]   # BGZF for bytes [0 ..< uOff]
@@ -117,23 +117,26 @@ type BoundarySplit = object
 
 var gBoundaryNext {.global.}: Atomic[int]
 
-proc boundaryWorker(pathPtr: ptr string; voffsPtr: ptr seq[(int64, int)];
-                    splitsPtr: ptr seq[BoundarySplit];
-                    nTotal: int): int {.gcsafe.} =
+type BoundaryWorkerArgs = object
+  pathPtr: ptr string
+  voffsPtr: ptr seq[(int64, int)]
+  splitsPtr: ptr seq[BoundarySplit]
+  nTotal: int
+
+proc boundaryWorkerThread(args: BoundaryWorkerArgs) {.thread.} =
   ## Pull boundary indices atomically and split each boundary block.
   ## Each worker opens its own fd to avoid seek contention.
-  let f = open(pathPtr[], fmRead)
+  let f = open(args.pathPtr[], fmRead)
   defer: f.close()
   while true:
     let bi = gBoundaryNext.fetchAdd(1, moRelaxed)
-    if bi >= nTotal: break
-    let (off, uOff) = voffsPtr[][bi]
+    if bi >= args.nTotal: break
+    let (off, uOff) = args.voffsPtr[][bi]
     if uOff == 0:
-      splitsPtr[][bi].blkSize = readBgzfBlockSize(f, off)
+      args.splitsPtr[][bi].blkSize = readBgzfBlockSize(f, off)
     else:
       let (h, t, sz) = splitBgzfBlockBothSides(f, off, uOff)
-      splitsPtr[][bi] = BoundarySplit(head: h, tail: t, blkSize: sz)
-  return 0
+      args.splitsPtr[][bi] = BoundarySplit(head: h, tail: t, blkSize: sz)
 
 # ---------------------------------------------------------------------------
 # Scan-mode boundary resolution — find record boundaries by decompression
@@ -311,11 +314,18 @@ proc computeShardsIndexed(vcfPath: string; headerBytes: seq[byte];
   if boundaryVoffs.len > 0:
     gBoundaryNext.store(0, moRelaxed)
     let nWorkers = min(nThreads, boundaryVoffs.len)
-    var bfvs = newSeq[FlowVar[int]](nWorkers)
-    for i in 0 ..< nWorkers:
-      bfvs[i] = spawn boundaryWorker(unsafeAddr vcfPath, addr boundaryVoffs,
-                                      addr splits, boundaryVoffs.len)
-    for fv in bfvs: discard ^fv
+    let args = BoundaryWorkerArgs(pathPtr: unsafeAddr vcfPath,
+                                  voffsPtr: addr boundaryVoffs,
+                                  splitsPtr: addr splits,
+                                  nTotal: boundaryVoffs.len)
+    if nWorkers <= 1:
+      boundaryWorkerThread(args)
+    else:
+      var threads = newSeq[Thread[BoundaryWorkerArgs]](nWorkers)
+      for i in 0 ..< nWorkers:
+        createThread(threads[i], boundaryWorkerThread, args)
+      for i in 0 ..< nWorkers:
+        joinThread(threads[i])
 
   info(&"computeShards: {effN} shards, file size {fileSize} bytes, EOF at {fileSize - 28}")
   buildShardTasks(vcfPath, headerBytes, firstBlockOff, firstUOff,
@@ -471,7 +481,6 @@ proc scatter*(vcfPath: string; nShards: int; outputTemplate: string;
   ## When clampShards is true, nShards is reduced to the number of available
   ## index entries if it would otherwise exceed it (instead of erroring).
   let actualThreads = if nThreads == 0: countProcessors() else: nThreads
-  setMaxPoolSize(actualThreads)
   info(&"scatter: using {actualThreads} thread(s)")
   var tasks = computeShards(vcfPath, nShards, actualThreads, forceScan, format,
                             clampShards)
@@ -495,11 +504,12 @@ proc scatter*(vcfPath: string; nShards: int; outputTemplate: string;
   if actualThreads > 1:
     gScatterNext.store(0, moRelaxed)
     let nWorkers = min(actualThreads, nShards)
-    var fvs = newSeq[FlowVar[int]](nWorkers)
+    let args = ScatterWorkerArgs(tasksPtr: addr tasks, nTotal: nShards)
+    var threads = newSeq[Thread[ScatterWorkerArgs]](nWorkers)
     for i in 0 ..< nWorkers:
-      fvs[i] = spawn scatterWorker(addr tasks, nShards)
-    for fv in fvs:
-      discard ^fv
+      createThread(threads[i], scatterWorkerThread, args)
+    for i in 0 ..< nWorkers:
+      joinThread(threads[i])
   else:
     for task in tasks:
       discard doWriteShard(task)

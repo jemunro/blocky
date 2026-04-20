@@ -6,9 +6,6 @@
 echo "--------------- Test Run ---------------"
 
 import std/[atomics, os, osproc, strformat, strutils, tempfiles]
-{.warning[Deprecated]: off.}
-import std/threadpool
-{.warning[Deprecated]: on.}
 import test_utils
 import "../src/blocky/scatter"
 import "../src/blocky/run"
@@ -505,47 +502,57 @@ timed("R44", "DepositQueue: deposit in order, waitFor retrieves correctly"):
 # ---------------------------------------------------------------------------
 # R45 — DepositQueue: out-of-order deposit, in-order waitFor
 # ---------------------------------------------------------------------------
+type DepositDelayedArgs = object
+  qp: ptr DepositQueue
+  idx: int
+  path: string
+
+proc depositDelayedThread(args: DepositDelayedArgs) {.thread.} =
+  sleep(args.idx * 10)
+  args.qp[].deposit(args.idx, args.path)
+
 timed("R45", "DepositQueue: out-of-order deposit, ordered waitFor"):
   var q = newDepositQueue(4)
-  # Deposit out of order using threads to exercise cross-thread visibility.
-  proc depositDelayed(qp: ptr DepositQueue; idx: int; path: string): int {.gcsafe.} =
-    sleep(idx * 10)  # stagger: slot 2 deposits first, slot 3 last
-    qp[].deposit(idx, path)
-    0
-  setMaxPoolSize(4)
-  let fv2 = spawn depositDelayed(addr q, 2, "/tmp/s2")
-  let fv0 = spawn depositDelayed(addr q, 0, "/tmp/s0")
-  let fv3 = spawn depositDelayed(addr q, 3, "/tmp/s3")
-  let fv1 = spawn depositDelayed(addr q, 1, "/tmp/s1")
+  var threads: array[4, Thread[DepositDelayedArgs]]
+  createThread(threads[0], depositDelayedThread,
+               DepositDelayedArgs(qp: addr q, idx: 2, path: "/tmp/s2"))
+  createThread(threads[1], depositDelayedThread,
+               DepositDelayedArgs(qp: addr q, idx: 0, path: "/tmp/s0"))
+  createThread(threads[2], depositDelayedThread,
+               DepositDelayedArgs(qp: addr q, idx: 3, path: "/tmp/s3"))
+  createThread(threads[3], depositDelayedThread,
+               DepositDelayedArgs(qp: addr q, idx: 1, path: "/tmp/s1"))
   # waitFor in order — each blocks until that slot is deposited.
   doAssert q.waitFor(0) == "/tmp/s0", "R45: slot 0 wrong"
   doAssert q.waitFor(1) == "/tmp/s1", "R45: slot 1 wrong"
   doAssert q.waitFor(2) == "/tmp/s2", "R45: slot 2 wrong"
   doAssert q.waitFor(3) == "/tmp/s3", "R45: slot 3 wrong"
-  discard ^fv0; discard ^fv1; discard ^fv2; discard ^fv3
+  for i in 0..3: joinThread(threads[i])
   freeDepositQueue(q)
 
 # ---------------------------------------------------------------------------
 # R46 — Atomic shard counter: each index claimed exactly once
 # ---------------------------------------------------------------------------
+type PullerArgs = object
+  claimedArr: ptr array[8, Atomic[int]]
+
+proc pullerThread(args: PullerArgs) {.thread.} =
+  while true:
+    let idx = gNextShard.fetchAdd(1, moRelaxed)
+    if idx >= 8: break
+    discard args.claimedArr[][idx].fetchAdd(1, moRelaxed)
+
 timed("R46", "gNextShard: atomic pull, each index claimed once"):
   const NItems = 8
   gNextShard.store(0, moRelaxed)
   var claimed: array[NItems, Atomic[int]]
   for i in 0 ..< NItems:
     claimed[i].store(0, moRelaxed)
-  proc puller(claimedArr: ptr array[NItems, Atomic[int]]): int {.gcsafe.} =
-    while true:
-      let idx = gNextShard.fetchAdd(1, moRelaxed)
-      if idx >= NItems: break
-      discard claimedArr[][idx].fetchAdd(1, moRelaxed)
-    0
-  setMaxPoolSize(4)
-  var fvs: array[4, FlowVar[int]]
+  var threads: array[4, Thread[PullerArgs]]
   for i in 0..3:
-    fvs[i] = spawn puller(addr claimed)
-  for fv in fvs:
-    discard ^fv
+    createThread(threads[i], pullerThread, PullerArgs(claimedArr: addr claimed))
+  for i in 0..3:
+    joinThread(threads[i])
   for i in 0 ..< NItems:
     doAssert claimed[i].load(moRelaxed) == 1,
       &"R46: index {i} claimed {claimed[i].load(moRelaxed)} times (expected 1)"

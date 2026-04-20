@@ -9,6 +9,7 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  CONDA_PKGS: bcftools tabix cmake make c-compiler 'nim>=2.2.6'
 
 permissions:
   contents: write
@@ -27,8 +28,16 @@ jobs:
       - name: Trust workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
+      - name: Cache conda env
+        uses: actions/cache@v4
+        id: conda-cache
+        with:
+          path: /opt/conda
+          key: conda-${{ env.CONDA_PKGS }}
+
       - name: Install dependencies
-        run: mamba install -y -c bioconda -c conda-forge bcftools tabix cmake make c-compiler 'nim>=2.2.6'
+        if: steps.conda-cache.outputs.cache-hit != 'true'
+        run: mamba install -y -c bioconda -c conda-forge ${{ env.CONDA_PKGS }}
 
       - name: Cache libdeflate build
         uses: actions/cache@v4
