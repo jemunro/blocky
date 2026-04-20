@@ -20,35 +20,36 @@ proc warnFormatMismatch(inputPath: string; outputPath: string) =
 const NimblePkgVersion {.strdefine.} = "dev"
 const VERSION = NimblePkgVersion
 
-proc usage() =
-  ## Print top-level usage to stderr and exit 1.
-  stderr.writeLine "blocky v" & VERSION
-  stderr.writeLine ""
-  stderr.writeLine "Usage: blocky <subcommand> [options]"
-  stderr.writeLine ""
-  stderr.writeLine "Subcommands:"
-  stderr.writeLine "  scatter      Split a bgzipped file into N shards"
-  stderr.writeLine "  run          Scatter, pipe each shard through a tool pipeline"
-  stderr.writeLine "  gather       Concatenate pre-existing shard files into a single output"
-  stderr.writeLine "  compress     BGZF-compress a file (like bgzip)"
-  stderr.writeLine "  decompress   Decompress a BGZF file"
-  stderr.writeLine ""
-  stderr.writeLine "Run 'blocky <subcommand> --help' for subcommand options."
-  quit(1)
+proc usage(code: int = 1) =
+  ## Print top-level usage and exit with code (0 for --help, 1 for errors).
+  let f = if code == 0: stdout else: stderr
+  f.writeLine "blocky v" & VERSION
+  f.writeLine ""
+  f.writeLine "Usage: blocky <subcommand> [options]"
+  f.writeLine ""
+  f.writeLine "Subcommands:"
+  f.writeLine "  scatter      Split a bgzipped file into N shards"
+  f.writeLine "  run          Scatter, pipe each shard through a tool pipeline"
+  f.writeLine "  gather       Concatenate pre-existing shard files into a single output"
+  f.writeLine "  compress     BGZF-compress a file (like bgzip)"
+  f.writeLine "  decompress   Decompress a BGZF file"
+  f.writeLine ""
+  f.writeLine "Run 'blocky <subcommand> --help' for subcommand options."
+  quit(code)
 
-proc scatterUsage() =
-  ## Print scatter subcommand usage to stderr and exit 1.
-  stderr.writeLine "Usage: blocky scatter -n <n_shards> -o <prefix> [options] <input>"
-  stderr.writeLine ""
-  stderr.writeLine "Options:"
-  stderr.writeLine "  -n, --n-shards <int>      number of output shards (required, >= 1)"
-  stderr.writeLine "  -o, --output <str>        output file prefix (required)"
-  stderr.writeLine "  -t, --max-threads <int>   max threads for scan/split/write (default: min(n, 8))"
-  stderr.writeLine "      --scan                scan BGZF blocks (ignore index even if present)"
-  stderr.writeLine "      --clamp               reduce -n if fewer split points available"
-  stderr.writeLine "  -v, --verbose             print progress info to stderr"
-  stderr.writeLine "  -h, --help                show this help"
-  quit(1)
+proc scatterUsage(code: int = 1) =
+  let f = if code == 0: stdout else: stderr
+  f.writeLine "Usage: blocky scatter -n <n_shards> -o <prefix> [options] <input>"
+  f.writeLine ""
+  f.writeLine "Options:"
+  f.writeLine "  -n, --n-shards <int>      number of output shards (required, >= 1)"
+  f.writeLine "  -o, --output <str>        output file prefix (required)"
+  f.writeLine "  -t, --max-threads <int>   max threads for scan/split/write (default: min(n, 8))"
+  f.writeLine "      --scan                scan BGZF blocks (ignore index even if present)"
+  f.writeLine "      --clamp               reduce -n if fewer split points available"
+  f.writeLine "  -v, --verbose             print progress info to stderr"
+  f.writeLine "  -h, --help                show this help"
+  quit(code)
 
 ## Short flags that DO NOT take a value. parseopt uses this set to correctly
 ## parse attached values like `-n50` (otherwise it splits into `-n`, `-5`, `-0`).
@@ -110,7 +111,7 @@ proc runScatter(rawArgs: seq[string]) =
       of "v", "verbose":
         bgzf.verbose = true
       of "h", "help":
-        scatterUsage()
+        scatterUsage(0)
       else:
         stderr.writeLine "error: unknown option: -" & p.key
         scatterUsage()
@@ -144,29 +145,29 @@ proc runScatter(rawArgs: seq[string]) =
   warnFormatMismatch(inputFile, outPrefix)
   scatter(inputFile, nShards, outPrefix, nThreads, forceScan, fmt, clampShards)
 
-proc runUsage() =
-  ## Print run subcommand usage to stderr and exit 1.
-  stderr.writeLine "Usage: blocky run -n <n_workers> [-m <shards_per_worker>] [options] <input> (--- | :::) <cmd> [args...]"
-  stderr.writeLine ""
-  stderr.writeLine "Options:"
-  stderr.writeLine "  -n, --n-workers <int>              number of concurrent worker pipelines (required, >= 1)"
-  stderr.writeLine "  -m, --max-shards-per-worker <int>  max shards each worker processes (default: 1)"
-  stderr.writeLine "  -o, --output <str>                 output path (default: stdout)"
-  stderr.writeLine "  -u, --uncompressed                 force uncompressed file output"
-  stderr.writeLine "      --discard                      discard subprocess stdout (tool manages own output)"
-  stderr.writeLine "      --discard-stderr               discard subprocess stderr"
-  stderr.writeLine "  -t, --max-threads <int>            max scatter threads (default: min(n-workers, 8))"
-  stderr.writeLine "      --scan                         scan BGZF blocks (ignore index even if present)"
-  stderr.writeLine "      --clamp                        reduce total shards if fewer split points available"
-  stderr.writeLine "      --no-kill                      on failure, let sibling shards finish"
-  stderr.writeLine "  -v, --verbose                      print per-shard progress to stderr"
-  stderr.writeLine "  -h, --help                         show this help"
-  stderr.writeLine ""
-  stderr.writeLine "Separate pipeline stages with ::: or ---."
-  stderr.writeLine "  blocky run -n 4 -o out.vcf input.vcf.gz ::: bcftools view -Ov"
-  stderr.writeLine "  blocky run -n 4 -o out.bcf input.vcf.gz ::: bcftools +fill-tags -Ou ::: bcftools view -Ob"
-  stderr.writeLine "  blocky run -n 4 --discard input.vcf.gz ::: bcftools view -Oz -o out.{}.vcf.gz"
-  quit(1)
+proc runUsage(code: int = 1) =
+  let f = if code == 0: stdout else: stderr
+  f.writeLine "Usage: blocky run -n <n_workers> [-m <shards_per_worker>] [options] <input> (--- | :::) <cmd> [args...]"
+  f.writeLine ""
+  f.writeLine "Options:"
+  f.writeLine "  -n, --n-workers <int>              number of concurrent worker pipelines (required, >= 1)"
+  f.writeLine "  -m, --max-shards-per-worker <int>  max shards each worker processes (default: 1)"
+  f.writeLine "  -o, --output <str>                 output path (default: stdout)"
+  f.writeLine "  -u, --uncompressed                 force uncompressed file output"
+  f.writeLine "      --discard                      discard subprocess stdout (tool manages own output)"
+  f.writeLine "      --discard-stderr               discard subprocess stderr"
+  f.writeLine "  -t, --max-threads <int>            max scatter threads (default: min(n-workers, 8))"
+  f.writeLine "      --scan                         scan BGZF blocks (ignore index even if present)"
+  f.writeLine "      --clamp                        reduce total shards if fewer split points available"
+  f.writeLine "      --no-kill                      on failure, let sibling shards finish"
+  f.writeLine "  -v, --verbose                      print per-shard progress to stderr"
+  f.writeLine "  -h, --help                         show this help"
+  f.writeLine ""
+  f.writeLine "Separate pipeline stages with ::: or ---."
+  f.writeLine "  blocky run -n 4 -o out.vcf input.vcf.gz ::: bcftools view -Ov"
+  f.writeLine "  blocky run -n 4 -o out.bcf input.vcf.gz ::: bcftools +fill-tags -Ou ::: bcftools view -Ob"
+  f.writeLine "  blocky run -n 4 --discard input.vcf.gz ::: bcftools view -Oz -o out.{}.vcf.gz"
+  quit(code)
 
 proc runRun(rawArgs: seq[string]) =
   ## Parse `run` subcommand arguments, build a RunPipelineCfg, and dispatch
@@ -247,7 +248,7 @@ proc runRun(rawArgs: seq[string]) =
       of "v", "verbose":
         bgzf.verbose = true
       of "h", "help":
-        runUsage()
+        runUsage(0)
       else:
         stderr.writeLine "error: unknown option: -" & p.key
         runUsage()
@@ -308,15 +309,15 @@ proc runRun(rawArgs: seq[string]) =
     forceUncompress:     forceUncompress,
     warnBraceNoDiscard:  warnBrace))
 
-proc gatherUsage() =
-  ## Print gather subcommand usage to stderr and exit 1.
-  stderr.writeLine "Usage: blocky gather [-o <output>] [options] <shard1> [<shard2> ...]"
-  stderr.writeLine ""
-  stderr.writeLine "Options:"
-  stderr.writeLine "  -o, --output <str>           gather output path (default: stdout)"
-  stderr.writeLine "  -v, --verbose                print progress to stderr"
-  stderr.writeLine "  -h, --help                   show this help"
-  quit(1)
+proc gatherUsage(code: int = 1) =
+  let f = if code == 0: stdout else: stderr
+  f.writeLine "Usage: blocky gather [-o <output>] [options] <shard1> [<shard2> ...]"
+  f.writeLine ""
+  f.writeLine "Options:"
+  f.writeLine "  -o, --output <str>           gather output path (default: stdout)"
+  f.writeLine "  -v, --verbose                print progress to stderr"
+  f.writeLine "  -h, --help                   show this help"
+  quit(code)
 
 proc runGather(rawArgs: seq[string]) =
   ## Parse gather subcommand arguments and concatenate pre-existing shard files.
@@ -334,7 +335,7 @@ proc runGather(rawArgs: seq[string]) =
       of "v", "verbose":
         bgzf.verbose = true
       of "h", "help":
-        gatherUsage()
+        gatherUsage(0)
       else:
         stderr.writeLine "error: unknown option: -" & p.key
         gatherUsage()
@@ -361,29 +362,31 @@ proc runGather(rawArgs: seq[string]) =
       createDir(outDir)
   gatherFiles(cfg, inputFiles)
 
-proc compressUsage() =
-  stderr.writeLine "Usage: blocky compress [-c] [file]"
-  stderr.writeLine ""
-  stderr.writeLine "Compress input to BGZF format."
-  stderr.writeLine ""
-  stderr.writeLine "Options:"
-  stderr.writeLine "  -c, --stdout    write to stdout, keep original file"
-  stderr.writeLine "  -h, --help      show this help"
-  stderr.writeLine ""
-  stderr.writeLine "If no file is given, reads from stdin and writes to stdout."
-  quit(1)
+proc compressUsage(code: int = 1) =
+  let f = if code == 0: stdout else: stderr
+  f.writeLine "Usage: blocky compress [-c] [file]"
+  f.writeLine ""
+  f.writeLine "Compress input to BGZF format."
+  f.writeLine ""
+  f.writeLine "Options:"
+  f.writeLine "  -c, --stdout    write to stdout, keep original file"
+  f.writeLine "  -h, --help      show this help"
+  f.writeLine ""
+  f.writeLine "If no file is given, reads from stdin and writes to stdout."
+  quit(code)
 
-proc decompressUsage() =
-  stderr.writeLine "Usage: blocky decompress [-c] [file]"
-  stderr.writeLine ""
-  stderr.writeLine "Decompress BGZF input to raw bytes."
-  stderr.writeLine ""
-  stderr.writeLine "Options:"
-  stderr.writeLine "  -c, --stdout    write to stdout, keep original file"
-  stderr.writeLine "  -h, --help      show this help"
-  stderr.writeLine ""
-  stderr.writeLine "If no file is given, reads from stdin and writes to stdout."
-  quit(1)
+proc decompressUsage(code: int = 1) =
+  let f = if code == 0: stdout else: stderr
+  f.writeLine "Usage: blocky decompress [-c] [file]"
+  f.writeLine ""
+  f.writeLine "Decompress BGZF input to raw bytes."
+  f.writeLine ""
+  f.writeLine "Options:"
+  f.writeLine "  -c, --stdout    write to stdout, keep original file"
+  f.writeLine "  -h, --help      show this help"
+  f.writeLine ""
+  f.writeLine "If no file is given, reads from stdin and writes to stdout."
+  quit(code)
 
 proc runCompress(rawArgs: seq[string]) =
   var toStdout = false
@@ -396,7 +399,7 @@ proc runCompress(rawArgs: seq[string]) =
     of cmdShortOption, cmdLongOption:
       case p.key
       of "c", "stdout": toStdout = true
-      of "h", "help": compressUsage()
+      of "h", "help": compressUsage(0)
       else:
         stderr.writeLine "error: unknown option: -" & p.key
         quit(1)
@@ -457,7 +460,7 @@ proc runDecompress(rawArgs: seq[string]) =
     of cmdShortOption, cmdLongOption:
       case p.key
       of "c", "stdout": toStdout = true
-      of "h", "help": decompressUsage()
+      of "h", "help": decompressUsage(0)
       else:
         stderr.writeLine "error: unknown option: -" & p.key
         quit(1)
@@ -529,7 +532,7 @@ proc mainEntry*() =
   of "--version":
     echo "blocky v" & VERSION
   of "--help", "-h":
-    usage()
+    usage(0)
   else:
     stderr.writeLine "error: unknown subcommand '" & args[0] & "'"
     usage()
