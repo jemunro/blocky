@@ -1,6 +1,7 @@
 process BLOCKY_VCFANNO {
     label 'process_vcfanno'
     cpus { ncpus }
+    stageInMode 'copy'
 
     input:
     tuple val(rep), val(ncpus), val(nthreads), path(input), path(index), path(vcfanno_conf)
@@ -19,5 +20,7 @@ process BLOCKY_VCFANNO {
     printf 'test\\tmode\\tncpus\\tnthreads\\trep\\tformat\\n' > meta.tsv
     printf '%s\\t%s\\t%d\\t%d\\t%d\\t%s\\n' 'vcfanno' '${mode}' ${ncpus} ${nthreads} ${rep} 'vcf' >> meta.tsv
     paste meta.tsv timing.tsv > result.tsv
+
+    rm $input $index
     """
 }

@@ -8,14 +8,14 @@ workflow BENCHMARK_VCFANNO {
 
     main:
     // Build base channel: rep x input x conf
-    ch_base = Channel.of(1..params.nreps).flatten()
+    ch_base = channel.of(1..params.nreps).flatten()
         .combine(vcf_with_index)
         .combine(vcfanno_conf)
         // -> [rep, vcf, tbi, conf]
 
-    // --- Native (baseline + parallel): ncpus=1 plus all ncpus ---
+    // --- Native: all ncpus (ncpus=1 serves as baseline) ---
     ch_native = ch_base
-        .combine(Channel.of(1).mix(Channel.of(params.ncpus).flatten()))
+        .combine(channel.of(params.ncpus).flatten())
         .map { rep, vcf, tbi, conf, ncpus ->
             tuple(rep, ncpus, vcf, tbi, conf)
         }
@@ -24,13 +24,13 @@ workflow BENCHMARK_VCFANNO {
 
     // --- Blocky: nthreads=1 for all ncpus, plus nthreads=2 for ncpus >= 4 ---
     ch_blocky_t1 = ch_base
-        .combine(Channel.of(params.ncpus).flatten())
+        .combine(channel.of(params.ncpus).flatten())
         .map { rep, vcf, tbi, conf, ncpus ->
             tuple(rep, ncpus, 1, vcf, tbi, conf)
         }
 
     ch_blocky_t2 = ch_base
-        .combine(Channel.of(params.ncpus).flatten().filter { it >= 4 })
+        .combine(channel.of(params.ncpus).flatten().filter { it >= 4 })
         .map { rep, vcf, tbi, conf, ncpus ->
             tuple(rep, ncpus, 2, vcf, tbi, conf)
         }

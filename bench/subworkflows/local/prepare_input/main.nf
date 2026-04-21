@@ -1,4 +1,4 @@
-include { INDEX } from '../../../modules/local/index/main.nf'
+include { PREPARE } from '../../../modules/local/prepare/main.nf'
 
 workflow PREPARE_INPUT {
     take:
@@ -7,7 +7,7 @@ workflow PREPARE_INPUT {
     clinvar_tbi  // path: ClinVar TBI index
 
     main:
-    INDEX(test_vcf)
+    PREPARE(test_vcf)
 
     // Generate vcfanno.conf inline via collectFile
     vcfanno_conf = clinvar_vcf.map { vcf ->
@@ -23,6 +23,6 @@ ops    = ["self", "self", "self"]
     }.collectFile(name: 'vcfanno.conf', newLine: false)
 
     emit:
-    indexed      = INDEX.out.indexed   // tuple(vcf, tbi, csi, gzi, bcf, bcf_csi)
-    vcfanno_conf = vcfanno_conf        // path(vcfanno.conf)
+    indexed      = PREPARE.out.indexed   // tuple(vcf, tbi, csi, gzi, bcf, bcf_csi)
+    vcfanno_conf = vcfanno_conf          // path(vcfanno.conf)
 }

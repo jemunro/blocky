@@ -25,15 +25,14 @@ df <- read_tsv(params$data_file) %>%
 df_scaling <- df %>% filter(test != "scatter")
 df_scatter <- df %>% filter(test == "scatter")
 
-# Baseline: median wall time per test x format (mode == "baseline", ncpus == 1)
+# Baseline: median wall time per test x format (native, ncpus == 1)
 baselines <- df_scaling %>%
-  filter(mode == "baseline", ncpus == 1) %>%
+  filter(mode == "native", ncpus == 1) %>%
   group_by(test, format) %>%
   summarise(wall_baseline = median(wall_seconds), .groups = "drop")
 
 # Scaling results: join baselines and compute metrics
 results <- df_scaling %>%
-  filter(mode != "baseline") %>%
   left_join(baselines, by = c("test", "format")) %>%
   group_by(test, mode, ncpus, nthreads, format) %>%
   summarise(
@@ -57,7 +56,9 @@ results <- df_scaling %>%
   )
 
 # Scatter results: compare index types
+# Wall times are divided by 5 (5 internal reps per process invocation)
 scatter_results <- df_scatter %>%
+  mutate(wall_seconds = wall_seconds / 5) %>%
   group_by(mode) %>%
   summarise(
     wall_median = median(wall_seconds),
@@ -78,8 +79,7 @@ scatter_results <- df_scatter %>%
 ```{r plot-theme}
 mode_lines <- c(
   "native"    = "dashed",
-  "blocky"    = "solid",
-  "blocky_t2" = "dotted"
+  "blocky"    = "solid"
 )
 
 theme_bench <- theme_minimal() +

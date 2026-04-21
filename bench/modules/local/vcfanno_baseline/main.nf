@@ -9,7 +9,7 @@ process VCFANNO_BASELINE {
     path("result.tsv"), emit: results
 
     script:
-    def mode = ncpus == 1 ? 'baseline' : 'native'
+    def mode = 'native'
     """
     /usr/bin/time -v -o timing.txt bash -c 'vcfanno -p ${ncpus} ${vcfanno_conf} ${input} | bgzip > output.vcf.gz'
 

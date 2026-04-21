@@ -1,6 +1,8 @@
 process BCFTOOLS_BASELINE {
     label 'process_bcftools'
     cpus { ncpus }
+    stageInMode 'copy'
+    tag "$test:$format:$ncpus:$rep"
 
     input:
     tuple val(test), val(format), val(rep), val(ncpus), path(input), path(index)
@@ -9,7 +11,7 @@ process BCFTOOLS_BASELINE {
     path("result.tsv"), emit: results
 
     script:
-    def mode     = ncpus == 1 ? 'baseline' : 'native'
+    def mode     = 'native'
     def threads  = ncpus == 1 ? 0 : ncpus
     def out_flag = format == 'bcf' ? '-Ob' : '-Oz'
     def out_ext  = format == 'bcf' ? 'bcf' : 'vcf.gz'
@@ -30,5 +32,7 @@ process BCFTOOLS_BASELINE {
     printf 'test\\tmode\\tncpus\\tnthreads\\trep\\tformat\\n' > meta.tsv
     printf '%s\\t%s\\t%d\\t%d\\t%d\\t%s\\n' '${test}' '${mode}' ${ncpus} ${threads} ${rep} '${format}' >> meta.tsv
     paste meta.tsv timing.tsv > result.tsv
+    
+    rm $input $index
     """
 }
