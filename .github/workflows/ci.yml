@@ -94,8 +94,6 @@ jobs:
     strategy:
       matrix:
         include:
-          - base: quay.io/biocontainers/vcfanno:0.3.7--he881be0_0
-            suffix: vcfanno
           - base: quay.io/biocontainers/bcftools:1.23.1--hb2cee57_0
             suffix: bcftools
     steps:
