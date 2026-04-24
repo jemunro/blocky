@@ -1,6 +1,7 @@
 process REPORT {
     label 'process_r'
     cpus 1
+    tag "report"
 
     publishDir params.outdir, mode: 'copy'
 

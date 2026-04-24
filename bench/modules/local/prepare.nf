@@ -1,6 +1,7 @@
 process PREPARE {
     label 'process_bcftools'
     cpus 2
+    tag "prepare"
 
     input:
     path(vcf)

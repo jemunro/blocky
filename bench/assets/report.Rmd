@@ -78,8 +78,9 @@ scatter_results <- df_scatter %>%
 
 ```{r plot-theme}
 mode_lines <- c(
-  "native"    = "dashed",
-  "blocky"    = "solid"
+  "native"         = "dashed",
+  "blocky"         = "solid",
+  "scatter_gather" = "longdash"
 )
 
 theme_bench <- theme_minimal() +
@@ -94,6 +95,8 @@ ggplot(results, aes(x = ncpus, y = speedup, colour = mode, linetype = mode)) +
   geom_point(size = 2) +
   geom_errorbar(aes(ymin = speedup_min, ymax = speedup_max), width = 0.3, linewidth = 0.4) +
   geom_abline(slope = 1, intercept = 0, linetype = "dashed", colour = "grey60", linewidth = 0.4) +
+  scale_x_continuous(trans = "log2") +
+  scale_y_continuous(trans = "log2") +
   scale_linetype_manual(values = mode_lines) +
   facet_grid(test ~ format) +
   labs(x = "CPUs", y = "Speedup (vs baseline)", colour = "Mode", linetype = "Mode") +
@@ -110,6 +113,7 @@ ggplot(results, aes(x = ncpus, y = efficiency, colour = mode, linetype = mode)) 
   geom_point(size = 2) +
   geom_errorbar(aes(ymin = efficiency_min, ymax = efficiency_max), width = 0.3, linewidth = 0.4) +
   geom_hline(yintercept = 100, linetype = "dashed", colour = "grey60", linewidth = 0.4) +
+  scale_x_continuous(trans = "log2") +
   scale_linetype_manual(values = mode_lines) +
   facet_grid(test ~ format) +
   labs(x = "CPUs", y = "Efficiency (%)", colour = "Mode", linetype = "Mode") +
@@ -123,6 +127,8 @@ ggplot(results, aes(x = ncpus, y = wall_median, colour = mode, linetype = mode))
   geom_line(linewidth = 0.8) +
   geom_point(size = 2) +
   geom_errorbar(aes(ymin = wall_min, ymax = wall_max), width = 0.3, linewidth = 0.4) +
+  scale_x_continuous(trans = "log2") +
+  scale_y_continuous(trans = "log2") +
   scale_linetype_manual(values = mode_lines) +
   facet_grid(test ~ format, scales = "free_y") +
   labs(x = "CPUs", y = "Wall time (seconds)", colour = "Mode", linetype = "Mode") +

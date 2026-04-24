@@ -2,6 +2,7 @@ process BLOCKY_SCATTER {
     label 'process_bcftools'
     cpus 4
     stageInMode 'copy'
+    tag "$index_type:$rep"
 
     input:
     tuple val(index_type), val(rep), path(input), path(tbi), path(csi), path(gzi)
@@ -24,7 +25,7 @@ process BLOCKY_SCATTER {
         done
     '
 
-    # Parse timing and combine with metadata into single result
+    # Build result (can't use bench_run.sh due to internal loop)
     parse_time.awk timing.txt > timing.tsv
     printf 'test\\tmode\\tncpus\\tnthreads\\trep\\tformat\\n' > meta.tsv
     printf '%s\\t%s\\t%d\\t%d\\t%d\\t%s\\n' 'scatter' '${mode}' 4 1 ${rep} 'vcf' >> meta.tsv
