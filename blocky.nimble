@@ -35,7 +35,7 @@ before build:
 
 task release, "Build release binary":
   buildLibdeflate()
-  exec "nim c -d:release -d:strip src/blocky.nim"
+  exec "nim c -d:release -d:strip -o:blocky src/blocky.nim"
 
 task test, "Run all tests":
   exec "nimble build -y"  # CLI tests shell out to the binary
