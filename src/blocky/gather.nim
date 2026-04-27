@@ -124,7 +124,7 @@ proc chromLineFromBytes*(rawBytes: seq[byte]; fmt: FileFormat; isBgzf: bool): st
     while pos < rawBytes.len:
       let blkSize = bgzfBlockSize(rawBytes.toOpenArray(pos, rawBytes.high))
       if blkSize <= 0: break
-      decompBuf.add(decompressBgzf(rawBytes.toOpenArray(pos, pos + blkSize - 1)))
+      decompBuf.addMem(decompressBgzf(rawBytes.toOpenArray(pos, pos + blkSize - 1)))
       pos += blkSize
       let hEnd =
         if fmt == ffBcf: findBcfHeaderEnd(decompBuf)
@@ -153,11 +153,11 @@ proc chromLineFromFile*(path: string; fmt: FileFormat; isBgzf: bool): string =
   while decompBuf.len < 10 * 1024 * 1024:  # 10 MB safety limit
     let got = readBytes(f, buf, 0, BufSize)
     if got <= 0: break
-    rawBuf.add(buf.toOpenArray(0, got.int - 1))
+    rawBuf.addMem(buf.toOpenArray(0, got.int - 1))
     while blockPos + 18 <= rawBuf.len:
       let blkSize = bgzfBlockSize(rawBuf.toOpenArray(blockPos, rawBuf.high))
       if blkSize <= 0 or blockPos + blkSize > rawBuf.len: break
-      decompBuf.add(decompressBgzf(rawBuf.toOpenArray(blockPos, blockPos + blkSize - 1)))
+      decompBuf.addMem(decompressBgzf(rawBuf.toOpenArray(blockPos, blockPos + blkSize - 1)))
       blockPos += blkSize
     let hEnd =
       if fmt == ffBcf: findBcfHeaderEnd(decompBuf)
@@ -224,20 +224,20 @@ proc interceptShard*(shardIdx: int; inputFd: cint; tmpPath: string;
   info(&"intercept shard {shardIdx}: {fmt}, bgzf={isBgzf}")
 
   # Phase B: accumulate header.
-  var rawAccum: seq[byte]
+  var rawAccum = newSeqOfCap[byte](ChunkSize * 2)
   var bgzfPos = 0
-  var pending: seq[byte]  # decompressed bytes accumulated so far
+  var pending = newSeqOfCap[byte](ChunkSize * 4)  # decompressed bytes accumulated so far
 
   # Append initial read.
   if isBgzf:
-    rawAccum.add(readBuf.toOpenArray(0, initRead.int - 1))
+    rawAccum.addMem(readBuf.toOpenArray(0, initRead.int - 1))
     while bgzfPos + 18 <= rawAccum.len:
       let blkSize = bgzfBlockSize(rawAccum.toOpenArray(bgzfPos, rawAccum.high))
       if blkSize <= 0 or bgzfPos + blkSize > rawAccum.len: break
-      pending.add(decompressBgzf(rawAccum.toOpenArray(bgzfPos, bgzfPos + blkSize - 1)))
+      pending.addMem(decompressBgzf(rawAccum.toOpenArray(bgzfPos, bgzfPos + blkSize - 1)))
       bgzfPos += blkSize
   else:
-    pending.add(readBuf.toOpenArray(0, initRead.int - 1))
+    pending.addMem(readBuf.toOpenArray(0, initRead.int - 1))
 
   # Read until header end found.
   var hEnd = -1
@@ -251,14 +251,14 @@ proc interceptShard*(shardIdx: int; inputFd: cint; tmpPath: string;
     let n = posix.read(inputFd, cast[pointer](addr readBuf[0]), ChunkSize)
     if n <= 0: break
     if isBgzf:
-      rawAccum.add(readBuf.toOpenArray(0, n.int - 1))
+      rawAccum.addMem(readBuf.toOpenArray(0, n.int - 1))
       while bgzfPos + 18 <= rawAccum.len:
         let blkSize = bgzfBlockSize(rawAccum.toOpenArray(bgzfPos, rawAccum.high))
         if blkSize <= 0 or bgzfPos + blkSize > rawAccum.len: break
-        pending.add(decompressBgzf(rawAccum.toOpenArray(bgzfPos, bgzfPos + blkSize - 1)))
+        pending.addMem(decompressBgzf(rawAccum.toOpenArray(bgzfPos, bgzfPos + blkSize - 1)))
         bgzfPos += blkSize
     else:
-      pending.add(readBuf.toOpenArray(0, n.int - 1))
+      pending.addMem(readBuf.toOpenArray(0, n.int - 1))
   if hEnd < 0: hEnd = pending.len  # all header, no data
 
   # Phase C: #CHROM validation.
@@ -363,21 +363,24 @@ proc interceptShard*(shardIdx: int; inputFd: cint; tmpPath: string;
         fp += blkSize
 
     # Stream remaining pipe data: forward complete BGZF blocks.
-    var carry: seq[byte] =
-      if bgzfPos < rawAccum.len: rawAccum[bgzfPos ..< rawAccum.len]
-      else: @[]
+    var carry = newSeqOfCap[byte](262144)
+    if bgzfPos < rawAccum.len:
+      carry.addMem(rawAccum.toOpenArray(bgzfPos, rawAccum.high))
     rawAccum.setLen(0); pending.setLen(0)
     var decompBuf: seq[byte]
     while true:
       let n = posix.read(inputFd, cast[pointer](addr readBuf[0]), ChunkSize)
       if n <= 0: break
-      carry.add(readBuf.toOpenArray(0, n.int - 1))
+      let oldLen = carry.len
+      carry.setLenUninit(oldLen + n.int)
+      copyMem(addr carry[oldLen], addr readBuf[0], n.int)
       var p = 0
       while p + 18 <= carry.len:
         let blkSize = bgzfBlockSize(carry.toOpenArray(p, carry.high))
         if blkSize <= 0: break
         if p + blkSize > carry.len: break
-        if blkSize != BGZF_EOF.len or carry[p ..< p + blkSize] != @BGZF_EOF:
+        if not (blkSize == BGZF_EOF.len and
+                carry.toOpenArray(p, p + blkSize - 1) == BGZF_EOF.toOpenArray(0, BGZF_EOF.len - 1)):
           if direct and directUncompress:
             decompressBgzfInto(carry.toOpenArray(p, p + blkSize - 1), decompBuf)
             if decompBuf.len > 0:
@@ -386,7 +389,11 @@ proc interceptShard*(shardIdx: int; inputFd: cint; tmpPath: string;
             discard outFile.writeBytes(carry, p, blkSize)
         p += blkSize
       if p > 0:
-        carry = if p < carry.len: carry[p ..< carry.len] else: @[]
+        if p < carry.len:
+          moveMem(addr carry[0], addr carry[p], carry.len - p)
+          carry.setLen(carry.len - p)
+        else:
+          carry.setLen(0)
 
   else:
     # ── Uncompressed path ────────────────────────────────────────────────
@@ -406,11 +413,11 @@ proc interceptShard*(shardIdx: int; inputFd: cint; tmpPath: string;
     pending.setLen(0)
 
     # Stream remaining pipe data.
-    var accum: seq[byte]
+    var accum = newSeqOfCap[byte](FlushThresh + ChunkSize)
     while true:
       let n = posix.read(inputFd, cast[pointer](addr readBuf[0]), ChunkSize)
       if n <= 0: break
-      accum.add(readBuf.toOpenArray(0, n.int - 1))
+      accum.addMem(readBuf.toOpenArray(0, n.int - 1))
       if accum.len >= FlushThresh:
         if direct and directUncompress:
           discard outFile.writeBytes(accum, 0, accum.len)
@@ -462,7 +469,7 @@ proc gatherShard(outFile: File; shardPath: string;
     while blockPos < hdrRegion.len and headerEnd < 0:
       let blkSize = bgzfBlockSize(hdrRegion.toOpenArray(blockPos, hdrRegion.high))
       if blkSize <= 0 or blockPos + blkSize > hdrRegion.len: break
-      decompAccum.add(decompressBgzf(hdrRegion.toOpenArray(blockPos, blockPos + blkSize - 1)))
+      decompAccum.addMem(decompressBgzf(hdrRegion.toOpenArray(blockPos, blockPos + blkSize - 1)))
       blockPos += blkSize
       headerEnd =
         if fmt == ffBcf: findBcfHeaderEnd(decompAccum)

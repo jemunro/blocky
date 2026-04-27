@@ -172,6 +172,9 @@ proc deposit*(q: DepositQueue; idx: int; path: string) =
   slot.len = n.int32
   slot.ready.store(true, moRelease)
 
+when defined(linux):
+  const F_SETPIPE_SZ* = cint(1031)
+
 proc waitFor*(q: DepositQueue; idx: int): string =
   ## Block until slot idx is ready, then return the path and reset
   ## the slot. Used by the concat thread to consume deposits in order.
@@ -298,6 +301,8 @@ proc workerThread*(args: WorkerArgs) {.thread.} =
         continue
       discard posix.fcntl(stdoutPipe[0], F_SETFD, FD_CLOEXEC)
       discard posix.fcntl(stdoutPipe[1], F_SETFD, FD_CLOEXEC)
+      when defined(linux):
+        discard posix.fcntl(stdoutPipe[0], F_SETPIPE_SZ, 262144)
       stdoutPipeR = stdoutPipe[0]  # interceptor reads this
       stdoutFd = stdoutPipe[1]     # child writes to this
 
@@ -311,6 +316,8 @@ proc workerThread*(args: WorkerArgs) {.thread.} =
       continue
     discard posix.fcntl(stdinPipe[0], F_SETFD, FD_CLOEXEC)
     discard posix.fcntl(stdinPipe[1], F_SETFD, FD_CLOEXEC)
+    when defined(linux):
+      discard posix.fcntl(stdinPipe[1], F_SETPIPE_SZ, 262144)
 
     # Fork subprocess.
     var stderrFd: cint = -1
@@ -401,12 +408,14 @@ proc concatThread*(args: ConcatArgs) {.thread.} =
       # Decompress BGZF blocks and write raw bytes.
       const BufSize = 65536
       var buf = newSeqUninit[byte](BufSize)
-      var carry: seq[byte]
+      var carry = newSeqOfCap[byte](BufSize * 2)
       var decompBuf: seq[byte]
       while true:
         let n = posix.read(fd, addr buf[0], BufSize)
         if n <= 0: break
-        carry.add(buf.toOpenArray(0, n.int - 1))
+        let oldLen = carry.len
+        carry.setLenUninit(oldLen + n.int)
+        copyMem(addr carry[oldLen], addr buf[0], n.int)
         var p = 0
         while p + 18 <= carry.len:
           let blkSize = bgzfBlockSize(carry.toOpenArray(p, carry.high))

@@ -153,6 +153,14 @@ proc putLeU32(buf: var seq[byte]; pos: int; v: uint32) {.inline.} =
   buf[pos+2] = byte((v shr 16) and 0xff)
   buf[pos+3] = byte((v shr 24) and 0xff)
 
+proc addMem*(s: var seq[byte]; data: openArray[byte]) {.inline.} =
+  ## Append data to s using copyMem.  Nim's seq.add(openArray) compiles
+  ## to a byte-by-byte loop with bounds checks; this uses memcpy instead.
+  if data.len > 0:
+    let oldLen = s.len
+    s.setLenUninit(oldLen + data.len)
+    copyMem(addr s[oldLen], unsafeAddr data[0], data.len)
+
 proc bgzfBlockSize*(buf: openArray[byte]): int =
   ## Parse a BGZF block header at the start of buf; return total block size.
   ## Returns -1 if not a valid BGZF block.
@@ -214,7 +222,10 @@ when defined(linux):
 proc isPermanentUnsupport(e: cint): bool {.inline.} =
   ## True for errno values that indicate the syscall is permanently
   ## unsupported on this filesystem/kernel — safe to cache and skip.
-  e == ENOSYS or e == EXDEV or e == EOPNOTSUPP
+  ## EXDEV (cross-device) is NOT cached: it depends on the source/dest
+  ## pair, not the kernel.  A cross-FS scatter should not disable
+  ## copy_file_range for same-FS copies later in the same process.
+  e == ENOSYS or e == EOPNOTSUPP
 
 var gTierCopyFileRangeFailed* {.global.}: Atomic[bool]
 var gTierSendfileFailed* {.global.}: Atomic[bool]
@@ -381,12 +392,12 @@ proc compressToBgzfMulti*(data: openArray[byte]; level: int = 6): seq[byte] =
   ## Returns the concatenated BGZF blocks as a seq[byte].
   result = @[]
   if data.len == 0:
-    result.add(compressToBgzf(data, level))
+    result.addMem(compressToBgzf(data, level))
     return
   var pos = 0
   while pos < data.len:
     let chunkEnd = min(pos + BGZF_MAX_BLOCK_SIZE, data.len)
-    result.add(compressToBgzf(data[pos ..< chunkEnd], level))
+    result.addMem(compressToBgzf(data[pos ..< chunkEnd], level))
     pos = chunkEnd
 
 proc compressToBgzfMulti*(outFile: File; data: openArray[byte]; level: int = 6) =
@@ -445,7 +456,7 @@ proc decompressBgzfBytes*(data: openArray[byte]): seq[byte] =
   while pos + 18 <= data.len:
     let blkSize = bgzfBlockSize(data.toOpenArray(pos, data.high))
     if blkSize <= 0 or pos + blkSize > data.len: break
-    result.add(decompressBgzf(data.toOpenArray(pos, pos + blkSize - 1)))
+    result.addMem(decompressBgzf(data.toOpenArray(pos, pos + blkSize - 1)))
     pos += blkSize
 
 proc decompressBgzfFile*(path: string): seq[byte] =
@@ -471,7 +482,7 @@ proc decompressCopyBytes*(srcPath: string; dst: File; start: int64; length: int6
     if readBytes(src, blk, 0, 18) < 18: break
     let blkSize = bgzfBlockSize(blk)
     if blkSize <= 0 or cur + blkSize.int64 > endAt: break
-    if blkSize > blk.len: blk.setLen(blkSize)
+    if blkSize > blk.len: blk.setLenUninit(blkSize)
     # Read remaining bytes after the 18-byte header already in blk.
     if blkSize > 18:
       if readBytes(src, blk, 18, blkSize - 18) < blkSize - 18: break
@@ -505,7 +516,7 @@ proc bgzfDecompressStream*(inFile, outFile: File) =
     if hdrRead < 18: break
     let blkSize = bgzfBlockSize(blk)
     if blkSize <= 0: break
-    if blkSize > blk.len: blk.setLen(blkSize)
+    if blkSize > blk.len: blk.setLenUninit(blkSize)
     if blkSize > 18:
       let rest = readBytes(inFile, blk, 18, blkSize - 18)
       if rest < blkSize - 18: break
@@ -646,7 +657,7 @@ proc extractBcfHeaderAndFirstOffset*(path: string): (seq[byte], int64, int) =
     discard readBytes(f, blk, 0, blkSize)
     let content = decompressBgzf(blk)
     let blockLen = content.len.int64
-    accum.add(content)
+    accum.addMem(content)
     if lText < 0 and accum.len >= 9:
       for i in 0 ..< 5:
         if accum[i] != BCF_MAGIC[i]:
@@ -748,7 +759,7 @@ proc getHeaderAndFirstBlock*(vcfPath: string): (seq[byte], int64, int) =
         return (compressedHeader, pos, firstDataOff)
       else:
         # Pure header block — collect all decompressed bytes.
-        headerBytes.add(content)
+        headerBytes.addMem(content)
         prevEndedWithNewline = content[^1] == byte('\n')
     pos += blkSize.int64
   # Edge case: file has no data records (header only).
