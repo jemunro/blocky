@@ -48,10 +48,10 @@ jobs:
         run: nimble test -y
         env:
           BLOCKY_TEST_TIMEOUT: "10"
-          BLOCKY_IGNORE_TIMEOUT: "1"
+          BLOCKY_IGNORE_TIMEOUT: "0"
 
       - name: Build release
-        run: rm -f blocky && nimble release -y
+        run: rm -f blocky && nimble release -y && strip blocky
 
       - name: Upload binary
         uses: actions/upload-artifact@v4

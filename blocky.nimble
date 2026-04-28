@@ -34,7 +34,10 @@ before build:
   buildLibdeflate()
 
 task release, "Build release binary":
-  exec "nimble build -d:release -d:strip --panics:on -y"
+  --define:release
+  --define:strip
+  --panics:on
+  setCommand "build"
 
 task test, "Run all tests":
   exec "nimble build -y"  # CLI tests shell out to the binary
