@@ -72,7 +72,7 @@
   <text x="220" y="88" text-anchor="middle" font-size="9.5" fill="#475569">split into N=3 equal shards</text>
   <line x1="107" y1="92" x2="107" y2="104" stroke="#555" stroke-width="1.2" marker-end="url(#arrow)"/>
   <line x1="284" y1="92" x2="284" y2="104" stroke="#555" stroke-width="1.2" marker-end="url(#arrow)"/>
-  <line x1="444" y1="92" x2="444" y2="104" stroke="#555" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <line x1="461" y1="92" x2="461" y2="104" stroke="#555" stroke-width="1.2" marker-end="url(#arrow)"/>
 
   <!-- shard 1 -->
   <text x="107" y="118" text-anchor="middle" font-size="8.5" fill="#555">shard 1</text>
@@ -99,22 +99,22 @@
   <text x="355" y="137" text-anchor="middle" font-size="7.5" fill="white">B6a</text>
 
   <!-- shard 3 -->
-  <text x="444" y="118" text-anchor="middle" font-size="8.5" fill="#555">shard 3</text>
-  <rect x="374" y="122" width="36" height="20" rx="2" fill="#8e44ad" stroke="#6c3483" stroke-width="1"/>
-  <text x="392" y="137" text-anchor="middle" font-size="8.5" fill="white" font-weight="bold">HDR</text>
-  <rect x="414" y="122" width="18" height="20" rx="2" fill="#e67e22" stroke="#c96b0a" stroke-width="1"/>
-  <text x="423" y="137" text-anchor="middle" font-size="7.5" fill="white">B6b</text>
-  <rect x="436" y="122" width="36" height="20" rx="2" fill="#aab7c4" stroke="#7f8c8d" stroke-width="1"/>
-  <text x="454" y="137" text-anchor="middle" font-size="8.5" fill="white">B7</text>
-  <rect x="476" y="122" width="36" height="20" rx="2" fill="#aab7c4" stroke="#7f8c8d" stroke-width="1"/>
-  <text x="494" y="137" text-anchor="middle" font-size="8.5" fill="white">B8</text>
-  <rect x="516" y="122" width="36" height="20" rx="2" fill="#aab7c4" stroke="#7f8c8d" stroke-width="1"/>
-  <text x="534" y="137" text-anchor="middle" font-size="8.5" fill="white">B9</text>
+  <text x="461" y="118" text-anchor="middle" font-size="8.5" fill="#555">shard 3</text>
+  <rect x="391" y="122" width="36" height="20" rx="2" fill="#8e44ad" stroke="#6c3483" stroke-width="1"/>
+  <text x="409" y="137" text-anchor="middle" font-size="8.5" fill="white" font-weight="bold">HDR</text>
+  <rect x="431" y="122" width="18" height="20" rx="2" fill="#e67e22" stroke="#c96b0a" stroke-width="1"/>
+  <text x="440" y="137" text-anchor="middle" font-size="7.5" fill="white">B6b</text>
+  <rect x="453" y="122" width="36" height="20" rx="2" fill="#aab7c4" stroke="#7f8c8d" stroke-width="1"/>
+  <text x="471" y="137" text-anchor="middle" font-size="8.5" fill="white">B7</text>
+  <rect x="493" y="122" width="36" height="20" rx="2" fill="#aab7c4" stroke="#7f8c8d" stroke-width="1"/>
+  <text x="511" y="137" text-anchor="middle" font-size="8.5" fill="white">B8</text>
+  <rect x="533" y="122" width="36" height="20" rx="2" fill="#aab7c4" stroke="#7f8c8d" stroke-width="1"/>
+  <text x="551" y="137" text-anchor="middle" font-size="8.5" fill="white">B9</text>
 
   <!-- ── WORKER BOXES (between scatter and gather) ────────────── -->
   <line x1="107" y1="144" x2="107" y2="158" stroke="#555" stroke-width="1.2" marker-end="url(#arrow)"/>
   <line x1="284" y1="144" x2="284" y2="158" stroke="#555" stroke-width="1.2" marker-end="url(#arrow)"/>
-  <line x1="444" y1="144" x2="444" y2="158" stroke="#555" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <line x1="461" y1="144" x2="461" y2="158" stroke="#555" stroke-width="1.2" marker-end="url(#arrow)"/>
 
   <rect x="45"  y="160" width="124" height="34" rx="4" fill="#eaf4fb" stroke="#3498db" stroke-width="1.5"/>
   <text x="107" y="174" text-anchor="middle" font-size="10" font-weight="bold" fill="#2171a8">worker 1</text>
@@ -124,9 +124,9 @@
   <text x="284" y="174" text-anchor="middle" font-size="10" font-weight="bold" fill="#1a7a42">worker 2</text>
   <text x="284" y="187" text-anchor="middle" font-size="8.5" fill="#555">command</text>
 
-  <rect x="382" y="160" width="124" height="34" rx="4" fill="#fef9e7" stroke="#e67e22" stroke-width="1.5"/>
-  <text x="444" y="174" text-anchor="middle" font-size="10" font-weight="bold" fill="#b35e00">worker 3</text>
-  <text x="444" y="187" text-anchor="middle" font-size="8.5" fill="#555">command</text>
+  <rect x="399" y="160" width="124" height="34" rx="4" fill="#fef9e7" stroke="#e67e22" stroke-width="1.5"/>
+  <text x="461" y="174" text-anchor="middle" font-size="10" font-weight="bold" fill="#b35e00">worker 3</text>
+  <text x="461" y="187" text-anchor="middle" font-size="8.5" fill="#555">command</text>
 
   <!-- ================================================================
        blocky gather box  (title: top-right, covers outputs + final row)
@@ -140,7 +140,7 @@
   <!-- arrows from workers into gather box -->
   <line x1="107" y1="196" x2="107" y2="210" stroke="#555" stroke-width="1.2" marker-end="url(#arrow)"/>
   <line x1="284" y1="196" x2="284" y2="210" stroke="#555" stroke-width="1.2" marker-end="url(#arrow)"/>
-  <line x1="444" y1="196" x2="444" y2="210" stroke="#555" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <line x1="461" y1="196" x2="461" y2="210" stroke="#555" stroke-width="1.2" marker-end="url(#arrow)"/>
 
   <!-- per-worker output blocks (30px wide to leave room for HDR) -->
   <!-- worker 1: HDR + O1 O2 O3 (blue) — group centre ≈107 -->
@@ -161,19 +161,19 @@
   <text x="301" y="227" text-anchor="middle" font-size="8.5" fill="white">O5</text>
   <rect x="320" y="212" width="30" height="20" rx="2" fill="#27ae60" stroke="#1a7a42" stroke-width="1"/>
   <text x="335" y="227" text-anchor="middle" font-size="8.5" fill="white">O6</text>
-  <!-- worker 3: HDR + O7 O8 O9 (amber) — group centre ≈444 -->
-  <rect x="378" y="212" width="30" height="20" rx="2" fill="#8e44ad" stroke="#6c3483" stroke-width="1"/>
-  <text x="393" y="227" text-anchor="middle" font-size="8" fill="white" font-weight="bold">HDR</text>
-  <rect x="412" y="212" width="30" height="20" rx="2" fill="#e67e22" stroke="#b35e00" stroke-width="1"/>
-  <text x="427" y="227" text-anchor="middle" font-size="8.5" fill="white">O7</text>
-  <rect x="446" y="212" width="30" height="20" rx="2" fill="#e67e22" stroke="#b35e00" stroke-width="1"/>
-  <text x="461" y="227" text-anchor="middle" font-size="8.5" fill="white">O8</text>
-  <rect x="480" y="212" width="30" height="20" rx="2" fill="#e67e22" stroke="#b35e00" stroke-width="1"/>
-  <text x="495" y="227" text-anchor="middle" font-size="8.5" fill="white">O9</text>
+  <!-- worker 3: HDR + O7 O8 O9 (amber) — group centre ≈461 -->
+  <rect x="395" y="212" width="30" height="20" rx="2" fill="#8e44ad" stroke="#6c3483" stroke-width="1"/>
+  <text x="410" y="227" text-anchor="middle" font-size="8" fill="white" font-weight="bold">HDR</text>
+  <rect x="429" y="212" width="30" height="20" rx="2" fill="#e67e22" stroke="#b35e00" stroke-width="1"/>
+  <text x="444" y="227" text-anchor="middle" font-size="8.5" fill="white">O7</text>
+  <rect x="463" y="212" width="30" height="20" rx="2" fill="#e67e22" stroke="#b35e00" stroke-width="1"/>
+  <text x="478" y="227" text-anchor="middle" font-size="8.5" fill="white">O8</text>
+  <rect x="497" y="212" width="30" height="20" rx="2" fill="#e67e22" stroke="#b35e00" stroke-width="1"/>
+  <text x="512" y="227" text-anchor="middle" font-size="8.5" fill="white">O9</text>
 
   <!-- converge -->
   <polyline points="107,234 107,252 284,252" fill="none" stroke="#555" stroke-width="1.2"/>
-  <polyline points="444,234 444,252 284,252" fill="none" stroke="#555" stroke-width="1.2"/>
+  <polyline points="461,234 461,252 284,252" fill="none" stroke="#555" stroke-width="1.2"/>
   <line x1="284" y1="252" x2="284" y2="264" stroke="#555" stroke-width="1.2" marker-end="url(#arrow)"/>
   <text x="460" y="249" font-size="8.5" fill="#555">concat BGZF streams</text>
 
