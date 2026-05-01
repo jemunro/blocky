@@ -34,14 +34,15 @@ proc shardOutputPath*(tmpl: string; shardIdx: int; nShards: int): string =
 
 type ShardTask* = object
   ## All data needed to write one output shard.  Passed by value to worker
-  ## threads so each thread owns its own copy of the small prepend/boundary
+  ## threads so each thread owns its own copy of the small header/boundary
   ## buffers; the bulk of the data is read directly from vcfPath.
   vcfPath:      string
   outFd*:       cint        ## open writable file descriptor (file or pipe write-end)
-  prepend:      seq[byte]   ## recompressed header + first-block tail / boundary tail
+  headerBgzf:   seq[byte]   ## BGZF-compressed header bytes
+  boundaryTail: seq[byte]   ## raw boundary tail bytes at shard start; empty if shard starts on block boundary
   rawStart:     int64       ## start of middle raw-copy region
   rawEnd:       int64       ## end of middle raw-copy region (exclusive)
-  boundaryHead: seq[byte]   ## head half of boundary split; empty for last shard
+  boundaryHead: seq[byte]   ## raw boundary head bytes at shard end; empty for last shard
   eofSeq:       seq[byte]   ## BGZF EOF block (same 28 bytes for every shard)
   logLine:      string      ## pre-formatted info line; printed when writing begins
   decompress*:  bool        ## if true, decompress BGZF blocks before writing
@@ -67,25 +68,29 @@ proc doWriteShard*(task: ShardTask): int {.gcsafe.} =
     var f: File
     discard open(f, FileHandle(task.outFd), fmWrite)
     try:
-      let prependRaw = decompressBgzfBytes(task.prepend)
-      discard f.writeBytes(prependRaw, 0, prependRaw.len)
+      let headerRaw = decompressBgzfBytes(task.headerBgzf)
+      discard f.writeBytes(headerRaw, 0, headerRaw.len)
+      if task.boundaryTail.len > 0:
+        discard f.writeBytes(task.boundaryTail, 0, task.boundaryTail.len)
       if task.rawEnd > task.rawStart:
         decompressCopyBytes(task.vcfPath, f, task.rawStart,
                             task.rawEnd - task.rawStart)
       if task.boundaryHead.len > 0:
-        let headRaw = decompressBgzfBytes(task.boundaryHead)
-        discard f.writeBytes(headRaw, 0, headRaw.len)
+        discard f.writeBytes(task.boundaryHead, 0, task.boundaryHead.len)
     except IOError:
       discard
     try: f.close() except IOError: discard
   else:
     # fd-level writes + sendfile — no File wrapper to avoid buffer conflicts.
-    writeAllFd(task.outFd, task.prepend)
+    # Boundary halves are raw bytes; compress on-the-fly before writing.
+    writeAllFd(task.outFd, task.headerBgzf)
+    if task.boundaryTail.len > 0:
+      writeAllFd(task.outFd, compressToBgzfMulti(task.boundaryTail))
     if task.rawEnd > task.rawStart:
       copyRangeFromFile(task.vcfPath, task.outFd, task.rawStart,
                       task.rawEnd - task.rawStart)
     if task.boundaryHead.len > 0:
-      writeAllFd(task.outFd, task.boundaryHead)
+      writeAllFd(task.outFd, compressToBgzfMulti(task.boundaryHead))
     writeAllFd(task.outFd, task.eofSeq)
     discard posix.close(task.outFd)
   if task.logLine.len > 0:
@@ -111,8 +116,8 @@ proc scatterWorkerThread(args: ScatterWorkerArgs) {.thread.} =
     discard doWriteShard(args.tasksPtr[][idx])
 
 type BoundarySplit = object
-  head:    seq[byte]   # BGZF for bytes [0 ..< uOff]
-  tail:    seq[byte]   # BGZF for bytes [uOff ..< len]
+  head:    seq[byte]   # raw bytes [0 ..< uOff]
+  tail:    seq[byte]   # raw bytes [uOff ..< len]
   blkSize: int64       # total BGZF block size at this offset
 
 var gBoundaryNext {.global.}: Atomic[int]
@@ -154,9 +159,9 @@ proc readDecompressBlock(f: File; off: int64): (seq[byte], int64) {.inline.} =
   (decompressBgzf(blk), blkSize)
 
 proc makeSplit(data: seq[byte]; uOff: int; blkSize: int64): BoundarySplit =
-  ## Split decompressed block data at uOff; recompress both halves.
-  let head = if uOff == 0: @[] else: compressToBgzfMulti(data[0 ..< uOff])
-  let tail = if uOff >= data.len: @[] else: compressToBgzfMulti(data[uOff ..< data.len])
+  ## Split decompressed block data at uOff; store raw byte slices.
+  let head = if uOff == 0: @[] else: data[0 ..< uOff]
+  let tail = if uOff >= data.len: @[] else: data[uOff ..< data.len]
   BoundarySplit(head: head, tail: tail, blkSize: blkSize)
 
 proc resolveScanBoundaries(vcfPath: string; voffs: seq[(int64, int)];
@@ -261,17 +266,14 @@ proc buildShardTasks(vcfPath: string; headerBytes: seq[byte];
 
   result = newSeq[ShardTask](effN)
   for i in 0 ..< effN:
-    var prepend: seq[byte]
-    prepend.add(headerBytes)
-
     let (startBlockOff, startUOff) =
       if i == 0: (firstBlockOff, firstUOff) else: boundaryVoffs[i - 1]
 
-    if startUOff > 0:
-      if i == 0:
-        prepend.add(firstShardTail)
+    let bTail: seq[byte] =
+      if startUOff > 0:
+        if i == 0: firstShardTail else: splits[i - 1].tail
       else:
-        prepend.add(splits[i - 1].tail)
+        @[]
 
     let rawStart: int64 =
       if startUOff == 0:
@@ -291,7 +293,8 @@ proc buildShardTasks(vcfPath: string; headerBytes: seq[byte];
       rawEnd = eofStart
 
     if rawEnd < rawStart: rawEnd = rawStart
-    result[i] = ShardTask(vcfPath: vcfPath, outFd: -1, prepend: prepend,
+    result[i] = ShardTask(vcfPath: vcfPath, outFd: -1,
+                          headerBgzf: headerBytes, boundaryTail: bTail,
                           rawStart: rawStart, rawEnd: rawEnd,
                           boundaryHead: boundaryHead, eofSeq: eofSeq,
                           logLine: "")
@@ -515,7 +518,7 @@ proc scatter*(vcfPath: string; nShards: int; outputTemplate: string;
       stderr.writeLine &"error: could not create output file: {outPath}"
       quit(1)
     if verbose:
-      let pre = tasks[i].prepend.len
+      let pre = tasks[i].headerBgzf.len + tasks[i].boundaryTail.len
       let raw = tasks[i].rawEnd - tasks[i].rawStart
       let app = tasks[i].boundaryHead.len
       let total = pre.int64 + raw + app.int64 + tasks[i].eofSeq.len.int64

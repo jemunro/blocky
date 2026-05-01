@@ -432,9 +432,9 @@ proc readBgzfBlockSize*(f: File; offset: int64): int64 =
 
 proc splitBgzfBlockBothSides*(f: File; offset: int64; uOff: int):
     (seq[byte], seq[byte], int64) =
-  ## Decompress the BGZF block at offset once and recompress both halves:
+  ## Decompress the BGZF block at offset and return raw byte slices:
   ## head = data[0 ..< uOff], tail = data[uOff ..< len].  Returns
-  ## (headBgzf, tailBgzf, blkSize).  Shared helper for `computeShards`
+  ## (headRaw, tailRaw, blkSize).  Shared helper for `computeShards`
   ## boundary precomputation — the caller supplies the open File so a single
   ## handle is reused across all boundary splits.
   ## head is empty when uOff == 0; tail is empty when uOff >= data.len.
@@ -444,8 +444,8 @@ proc splitBgzfBlockBothSides*(f: File; offset: int64; uOff: int):
   discard readBytes(f, blk, 0, blkSize.int)
   let data = decompressBgzf(blk)
   let split = min(uOff, data.len)
-  let head = if split == 0: @[] else: compressToBgzfMulti(data[0 ..< split])
-  let tail = if split >= data.len: @[] else: compressToBgzfMulti(data[split ..< data.len])
+  let head = if split == 0: @[] else: data[0 ..< split]
+  let tail = if split >= data.len: @[] else: data[split ..< data.len]
   result = (head, tail, blkSize)
 
 proc decompressBgzfBytes*(data: openArray[byte]): seq[byte] =
