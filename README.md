@@ -6,6 +6,8 @@ Parallelise processing of bgzipped files by splitting along BGZF block boundarie
 
 ## How it works
 
+![blocky diagram](docs/blocky_diagram.svg)
+
 A bgzipped file is a sequence of independent BGZF blocks, each containing up to 64 KiB of uncompressed data. Because blocks are self-contained, any block boundary is a valid split point -- the file can be divided into shards without decompressing the data in between.
 
 blocky uses the tabix (TBI), CSI, or GZI index to obtain block offsets, then splits the file at those boundaries. Each shard receives a recompressed header and a recompressed boundary block; the blocks in between are byte-copied directly from disk without decompression.
