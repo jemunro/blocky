@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 462" font-family="sans-serif" font-size="12">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 675 390" font-family="sans-serif" font-size="12">
   <defs>
     <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
       <path d="M0,0 L0,6 L8,3 z" fill="#555"/>
@@ -19,7 +19,7 @@
   <!-- ================================================================
        blocky run outer box  (title: top-left)
   ================================================================ -->
-  <rect x="8" y="8" width="684" height="384" rx="8"
+  <rect x="8" y="8" width="660" height="320" rx="8"
         fill="none" stroke="#3498db" stroke-width="2"/>
   <!-- top-left title chip -->
   <rect x="14" y="1" width="82" height="14" rx="3" fill="#3498db"/>
@@ -28,11 +28,11 @@
   <!-- ================================================================
        blocky scatter box  (title: top-right)
   ================================================================ -->
-  <rect x="18" y="20" width="664" height="150" rx="6"
+  <rect x="18" y="20" width="640" height="150" rx="6"
         fill="#eff6ff" stroke="#93c5fd" stroke-width="1.5"/>
   <!-- top-right title chip -->
-  <rect x="578" y="13" width="108" height="14" rx="3" fill="#93c5fd"/>
-  <text x="632" y="24" text-anchor="middle" font-size="9.5" font-weight="bold" fill="#1e40af">blocky scatter</text>
+  <rect x="560" y="13" width="80" height="14" rx="3" fill="#93c5fd"/>
+  <text x="600" y="24" text-anchor="middle" font-size="9.5" font-weight="bold" fill="#1e40af">blocky scatter</text>
 
   <!-- INPUT ROW -->
   <text x="28" y="42" font-size="9.5" font-weight="bold" fill="#334155">Input (VCF.gz)</text>
@@ -131,11 +131,11 @@
   <!-- ================================================================
        blocky gather box  (title: top-right, covers outputs + final row)
   ================================================================ -->
-  <rect x="18" y="198" width="664" height="188" rx="6"
+  <rect x="18" y="198" width="640" height="120" rx="6"
         fill="#f0fdf4" stroke="#86efac" stroke-width="1.5"/>
   <!-- top-right title chip -->
-  <rect x="578" y="191" width="108" height="14" rx="3" fill="#86efac"/>
-  <text x="632" y="202" text-anchor="middle" font-size="9.5" font-weight="bold" fill="#14532d">blocky gather</text>
+  <rect x="560" y="191" width="80" height="14" rx="3" fill="#86efac"/>
+  <text x="600" y="202" text-anchor="middle" font-size="9.5" font-weight="bold" fill="#14532d">blocky gather</text>
 
   <!-- arrows from workers into gather box -->
   <line x1="107" y1="196" x2="107" y2="210" stroke="#555" stroke-width="1.2" marker-end="url(#arrow)"/>
@@ -201,8 +201,8 @@
   <text x="349" y="299" text-anchor="middle" font-size="8.5" fill="white">O9</text>
 
   <!-- ── Note ──────────────────────────────────────────────── -->
-  <rect x="8" y="400" width="684" height="52" rx="6" fill="#fefce8" stroke="#fde047" stroke-width="1"/>
-  <text x="20" y="416" font-size="9" fill="#713f12">
+  <rect x="8" y="335" width="660" height="52" rx="6" fill="#fefce8" stroke="#fde047" stroke-width="1"/>
+  <text x="20" y="351" font-size="9" fill="#713f12">
     <tspan font-weight="bold">blocky run</tspan>
     <tspan> and </tspan>
     <tspan font-weight="bold">blocky scatter</tspan>
@@ -212,14 +212,14 @@
     <tspan font-weight="bold">run</tspan>
     <tspan> streams each chunk to a worker subprocess via stdin.</tspan>
   </text>
-  <text x="20" y="430" font-size="9" fill="#713f12">
+  <text x="20" y="365" font-size="9" fill="#713f12">
     <tspan>In both cases, worker output is written to temporary files, then concatenated by </tspan>
     <tspan font-weight="bold">gather</tspan>
     <tspan> (explicit) or internally by </tspan>
     <tspan font-weight="bold">run</tspan>
     <tspan>.</tspan>
   </text>
-  <text x="20" y="444" font-size="9" fill="#713f12">
+  <text x="20" y="379" font-size="9" fill="#713f12">
     <tspan font-weight="bold">scatter / gather</tspan>
     <tspan> exposes each step separately, allowing workers to run across multiple nodes.</tspan>
   </text>
