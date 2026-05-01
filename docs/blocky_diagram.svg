@@ -142,28 +142,34 @@
   <line x1="284" y1="196" x2="284" y2="210" stroke="#555" stroke-width="1.2" marker-end="url(#arrow)"/>
   <line x1="444" y1="196" x2="444" y2="210" stroke="#555" stroke-width="1.2" marker-end="url(#arrow)"/>
 
-  <!-- per-worker output blocks -->
-  <!-- worker 1: blue -->
-  <rect x="45"  y="212" width="36" height="20" rx="2" fill="#3498db" stroke="#2171a8" stroke-width="1"/>
-  <text x="63"  y="227" text-anchor="middle" font-size="8.5" fill="white">O1</text>
-  <rect x="85"  y="212" width="36" height="20" rx="2" fill="#3498db" stroke="#2171a8" stroke-width="1"/>
-  <text x="103" y="227" text-anchor="middle" font-size="8.5" fill="white">O2</text>
-  <rect x="125" y="212" width="36" height="20" rx="2" fill="#3498db" stroke="#2171a8" stroke-width="1"/>
-  <text x="143" y="227" text-anchor="middle" font-size="8.5" fill="white">O3</text>
-  <!-- worker 2: green -->
-  <rect x="222" y="212" width="36" height="20" rx="2" fill="#27ae60" stroke="#1a7a42" stroke-width="1"/>
-  <text x="240" y="227" text-anchor="middle" font-size="8.5" fill="white">O4</text>
-  <rect x="262" y="212" width="36" height="20" rx="2" fill="#27ae60" stroke="#1a7a42" stroke-width="1"/>
-  <text x="280" y="227" text-anchor="middle" font-size="8.5" fill="white">O5</text>
-  <rect x="302" y="212" width="36" height="20" rx="2" fill="#27ae60" stroke="#1a7a42" stroke-width="1"/>
-  <text x="320" y="227" text-anchor="middle" font-size="8.5" fill="white">O6</text>
-  <!-- worker 3: amber -->
-  <rect x="382" y="212" width="36" height="20" rx="2" fill="#e67e22" stroke="#b35e00" stroke-width="1"/>
-  <text x="400" y="227" text-anchor="middle" font-size="8.5" fill="white">O7</text>
-  <rect x="422" y="212" width="36" height="20" rx="2" fill="#e67e22" stroke="#b35e00" stroke-width="1"/>
-  <text x="440" y="227" text-anchor="middle" font-size="8.5" fill="white">O8</text>
-  <rect x="462" y="212" width="36" height="20" rx="2" fill="#e67e22" stroke="#b35e00" stroke-width="1"/>
-  <text x="480" y="227" text-anchor="middle" font-size="8.5" fill="white">O9</text>
+  <!-- per-worker output blocks (30px wide to leave room for HDR) -->
+  <!-- worker 1: HDR + O1 O2 O3 (blue) — group centre ≈107 -->
+  <rect x="41"  y="212" width="30" height="20" rx="2" fill="#8e44ad" stroke="#6c3483" stroke-width="1"/>
+  <text x="56"  y="227" text-anchor="middle" font-size="8" fill="white" font-weight="bold">HDR</text>
+  <rect x="75"  y="212" width="30" height="20" rx="2" fill="#3498db" stroke="#2171a8" stroke-width="1"/>
+  <text x="90"  y="227" text-anchor="middle" font-size="8.5" fill="white">O1</text>
+  <rect x="109" y="212" width="30" height="20" rx="2" fill="#3498db" stroke="#2171a8" stroke-width="1"/>
+  <text x="124" y="227" text-anchor="middle" font-size="8.5" fill="white">O2</text>
+  <rect x="143" y="212" width="30" height="20" rx="2" fill="#3498db" stroke="#2171a8" stroke-width="1"/>
+  <text x="158" y="227" text-anchor="middle" font-size="8.5" fill="white">O3</text>
+  <!-- worker 2: HDR + O4 O5 O6 (green) — group centre ≈284 -->
+  <rect x="218" y="212" width="30" height="20" rx="2" fill="#8e44ad" stroke="#6c3483" stroke-width="1"/>
+  <text x="233" y="227" text-anchor="middle" font-size="8" fill="white" font-weight="bold">HDR</text>
+  <rect x="252" y="212" width="30" height="20" rx="2" fill="#27ae60" stroke="#1a7a42" stroke-width="1"/>
+  <text x="267" y="227" text-anchor="middle" font-size="8.5" fill="white">O4</text>
+  <rect x="286" y="212" width="30" height="20" rx="2" fill="#27ae60" stroke="#1a7a42" stroke-width="1"/>
+  <text x="301" y="227" text-anchor="middle" font-size="8.5" fill="white">O5</text>
+  <rect x="320" y="212" width="30" height="20" rx="2" fill="#27ae60" stroke="#1a7a42" stroke-width="1"/>
+  <text x="335" y="227" text-anchor="middle" font-size="8.5" fill="white">O6</text>
+  <!-- worker 3: HDR + O7 O8 O9 (amber) — group centre ≈444 -->
+  <rect x="378" y="212" width="30" height="20" rx="2" fill="#8e44ad" stroke="#6c3483" stroke-width="1"/>
+  <text x="393" y="227" text-anchor="middle" font-size="8" fill="white" font-weight="bold">HDR</text>
+  <rect x="412" y="212" width="30" height="20" rx="2" fill="#e67e22" stroke="#b35e00" stroke-width="1"/>
+  <text x="427" y="227" text-anchor="middle" font-size="8.5" fill="white">O7</text>
+  <rect x="446" y="212" width="30" height="20" rx="2" fill="#e67e22" stroke="#b35e00" stroke-width="1"/>
+  <text x="461" y="227" text-anchor="middle" font-size="8.5" fill="white">O8</text>
+  <rect x="480" y="212" width="30" height="20" rx="2" fill="#e67e22" stroke="#b35e00" stroke-width="1"/>
+  <text x="495" y="227" text-anchor="middle" font-size="8.5" fill="white">O9</text>
 
   <!-- converge -->
   <polyline points="107,234 107,252 284,252" fill="none" stroke="#555" stroke-width="1.2"/>
@@ -171,26 +177,28 @@
   <line x1="284" y1="252" x2="284" y2="264" stroke="#555" stroke-width="1.2" marker-end="url(#arrow)"/>
   <text x="460" y="249" font-size="8.5" fill="#555">concat BGZF streams</text>
 
-  <!-- final output row -->
+  <!-- final output row: HDR from shard 1 kept, shards 2+3 headers stripped -->
   <text x="28" y="280" font-size="9.5" font-weight="bold" fill="#334155">Output (VCF.gz)</text>
-  <rect x="28"  y="284" width="36" height="20" rx="2" fill="#3498db" stroke="#2171a8" stroke-width="1"/>
-  <text x="46"  y="299" text-anchor="middle" font-size="8.5" fill="white">O1</text>
-  <rect x="68"  y="284" width="36" height="20" rx="2" fill="#3498db" stroke="#2171a8" stroke-width="1"/>
-  <text x="86"  y="299" text-anchor="middle" font-size="8.5" fill="white">O2</text>
-  <rect x="108" y="284" width="36" height="20" rx="2" fill="#3498db" stroke="#2171a8" stroke-width="1"/>
-  <text x="126" y="299" text-anchor="middle" font-size="8.5" fill="white">O3</text>
-  <rect x="148" y="284" width="36" height="20" rx="2" fill="#27ae60" stroke="#1a7a42" stroke-width="1"/>
-  <text x="166" y="299" text-anchor="middle" font-size="8.5" fill="white">O4</text>
-  <rect x="188" y="284" width="36" height="20" rx="2" fill="#27ae60" stroke="#1a7a42" stroke-width="1"/>
-  <text x="206" y="299" text-anchor="middle" font-size="8.5" fill="white">O5</text>
-  <rect x="228" y="284" width="36" height="20" rx="2" fill="#27ae60" stroke="#1a7a42" stroke-width="1"/>
-  <text x="246" y="299" text-anchor="middle" font-size="8.5" fill="white">O6</text>
-  <rect x="268" y="284" width="36" height="20" rx="2" fill="#e67e22" stroke="#b35e00" stroke-width="1"/>
-  <text x="286" y="299" text-anchor="middle" font-size="8.5" fill="white">O7</text>
-  <rect x="308" y="284" width="36" height="20" rx="2" fill="#e67e22" stroke="#b35e00" stroke-width="1"/>
-  <text x="326" y="299" text-anchor="middle" font-size="8.5" fill="white">O8</text>
-  <rect x="348" y="284" width="36" height="20" rx="2" fill="#e67e22" stroke="#b35e00" stroke-width="1"/>
-  <text x="366" y="299" text-anchor="middle" font-size="8.5" fill="white">O9</text>
+  <rect x="28"  y="284" width="30" height="20" rx="2" fill="#8e44ad" stroke="#6c3483" stroke-width="1"/>
+  <text x="43"  y="299" text-anchor="middle" font-size="8" fill="white" font-weight="bold">HDR</text>
+  <rect x="62"  y="284" width="30" height="20" rx="2" fill="#3498db" stroke="#2171a8" stroke-width="1"/>
+  <text x="77"  y="299" text-anchor="middle" font-size="8.5" fill="white">O1</text>
+  <rect x="96"  y="284" width="30" height="20" rx="2" fill="#3498db" stroke="#2171a8" stroke-width="1"/>
+  <text x="111" y="299" text-anchor="middle" font-size="8.5" fill="white">O2</text>
+  <rect x="130" y="284" width="30" height="20" rx="2" fill="#3498db" stroke="#2171a8" stroke-width="1"/>
+  <text x="145" y="299" text-anchor="middle" font-size="8.5" fill="white">O3</text>
+  <rect x="164" y="284" width="30" height="20" rx="2" fill="#27ae60" stroke="#1a7a42" stroke-width="1"/>
+  <text x="179" y="299" text-anchor="middle" font-size="8.5" fill="white">O4</text>
+  <rect x="198" y="284" width="30" height="20" rx="2" fill="#27ae60" stroke="#1a7a42" stroke-width="1"/>
+  <text x="213" y="299" text-anchor="middle" font-size="8.5" fill="white">O5</text>
+  <rect x="232" y="284" width="30" height="20" rx="2" fill="#27ae60" stroke="#1a7a42" stroke-width="1"/>
+  <text x="247" y="299" text-anchor="middle" font-size="8.5" fill="white">O6</text>
+  <rect x="266" y="284" width="30" height="20" rx="2" fill="#e67e22" stroke="#b35e00" stroke-width="1"/>
+  <text x="281" y="299" text-anchor="middle" font-size="8.5" fill="white">O7</text>
+  <rect x="300" y="284" width="30" height="20" rx="2" fill="#e67e22" stroke="#b35e00" stroke-width="1"/>
+  <text x="315" y="299" text-anchor="middle" font-size="8.5" fill="white">O8</text>
+  <rect x="334" y="284" width="30" height="20" rx="2" fill="#e67e22" stroke="#b35e00" stroke-width="1"/>
+  <text x="349" y="299" text-anchor="middle" font-size="8.5" fill="white">O9</text>
 
   <!-- ── Note ──────────────────────────────────────────────── -->
   <rect x="8" y="400" width="684" height="52" rx="6" fill="#fefce8" stroke="#fde047" stroke-width="1"/>
