@@ -10,7 +10,7 @@ Parallelise processing of bgzipped files by splitting along BGZF block boundarie
 
 A bgzipped file is a sequence of independent BGZF blocks, each containing up to 64 KiB of uncompressed data. Because blocks are self-contained, any block boundary is a valid split point -- the file can be divided into shards without decompressing the data in between.
 
-blocky uses the tabix (TBI), CSI, or GZI index to obtain block offsets, then splits the file at those boundaries. Each shard receives a recompressed header and a recompressed boundary block; the blocks in between are byte-copied directly from disk without decompression.
+When an index is present (TBI, CSI, or GZI), blocky uses it to locate block offsets and divide the file into equal-sized shards. Without an index, blocky scans the BGZF blocks directly — this works for any bgzipped file but is slightly slower as the file must be read sequentially to find split points. BCF files always require a CSI index. With `blocky scatter`, each shard file receives a recompressed header and a recompressed boundary block; all blocks in between are byte-copied directly from disk without decompression. With `blocky run`, the shard data is decompressed and streamed to the worker subprocess via stdin.
 
 Only one block per split point is ever decompressed and recompressed. For a file split into N shards, that is N-1 boundary blocks regardless of file size.
 
@@ -28,26 +28,15 @@ chmod +x blocky
 mv blocky /usr/local/bin/  # or anywhere on your PATH
 ```
 
+The binary is statically linked and ~400 kB.
+
 ### Docker images
 
 Pre-built images with common bioinformatics tools are available from GHCR:
 
 ```bash
 docker pull ghcr.io/jemunro/blocky/blocky-bcftools:latest
-docker pull ghcr.io/jemunro/blocky/blocky-vcfanno:latest
 ```
-
-### Build from source
-
-Requires Nim >= 2.0, cmake, and a C compiler.
-
-```bash
-git clone --recurse-submodules https://github.com/jemunro/blocky
-cd blocky
-nimble release    # -> produces ./blocky
-```
-
-libdeflate is vendored as a git submodule and built automatically on the first compile. Subsequent builds skip that step.
 
 ---
 
@@ -189,7 +178,7 @@ cat data.vcf | blocky compress -c | blocky decompress -c  # pipe mode
 
 Errors if the output file already exists. Warns if compressing an already-compressed file or decompressing a non-compressed file.
 
-These subcommands are included for convenience (e.g. on systems without htslib). If `bgzip` is available, prefer it -- it is multithreaded and better optimised for large files.
+These subcommands are included for convenience, e.g. on systems without htslib.
 
 ---
 
@@ -257,7 +246,7 @@ blocky run -n 8 -o out.vcf.gz input.vcf.gz \
 
 ## Performance
 
-- Middle BGZF blocks are byte-copied at disk bandwidth -- no decompression
+- With `blocky scatter`, middle BGZF blocks are byte-copied at disk bandwidth with no decompression; `blocky run` decompresses all blocks to stream raw bytes to workers
 - Only N-1 boundary blocks are decompressed per scatter (one per split point)
 - Worker pool model: `-n` workers pull from a shared shard queue, keeping all cores busy even when shard processing times vary
 - Tmp shard files are BGZF-compressed (saves disk), decompressed on-the-fly during concat if `-u` is set
