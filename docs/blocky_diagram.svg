@@ -1,0 +1,227 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 675 390" font-family="sans-serif" font-size="12">
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#555"/>
+    </marker>
+  </defs>
+
+  <!--
+    Block widths: regular W=36, split half Wh=18, gap G=4
+    Worker colours:
+      1: blue   fill=#eaf4fb stroke=#3498db out=#3498db
+      2: green  fill=#eafaf1 stroke=#27ae60 out=#27ae60
+      3: amber  fill=#fef9e7 stroke=#e67e22 out=#e67e22
+    HDR:   purple #8e44ad
+    Split: orange #e67e22
+    Blocks: grey  #aab7c4
+  -->
+
+  <!-- ================================================================
+       blocky run outer box  (title: top-left)
+  ================================================================ -->
+  <rect x="8" y="8" width="660" height="320" rx="8"
+        fill="none" stroke="#3498db" stroke-width="2"/>
+  <!-- top-left title chip -->
+  <rect x="14" y="1" width="82" height="14" rx="3" fill="#3498db"/>
+  <text x="55" y="12" text-anchor="middle" font-size="9.5" font-weight="bold" fill="white">blocky run</text>
+
+  <!-- ================================================================
+       blocky scatter box  (title: top-right)
+  ================================================================ -->
+  <rect x="18" y="20" width="640" height="150" rx="6"
+        fill="#eff6ff" stroke="#93c5fd" stroke-width="1.5"/>
+  <!-- top-right title chip -->
+  <rect x="560" y="13" width="80" height="14" rx="3" fill="#93c5fd"/>
+  <text x="600" y="24" text-anchor="middle" font-size="9.5" font-weight="bold" fill="#1e40af">blocky scatter</text>
+
+  <!-- INPUT ROW -->
+  <text x="28" y="42" font-size="9.5" font-weight="bold" fill="#334155">Input (VCF.gz)</text>
+  <rect x="28"  y="46" width="36" height="22" rx="3" fill="#8e44ad" stroke="#6c3483" stroke-width="1"/>
+  <text x="46"  y="62" text-anchor="middle" font-size="9" fill="white" font-weight="bold">HDR</text>
+  <rect x="68"  y="46" width="36" height="22" rx="3" fill="#aab7c4" stroke="#7f8c8d" stroke-width="1"/>
+  <text x="86"  y="62" text-anchor="middle" font-size="9" fill="white">B1</text>
+  <rect x="108" y="46" width="36" height="22" rx="3" fill="#aab7c4" stroke="#7f8c8d" stroke-width="1"/>
+  <text x="126" y="62" text-anchor="middle" font-size="9" fill="white">B2</text>
+  <!-- B3 split -->
+  <rect x="148" y="46" width="18" height="22" rx="2" fill="#e67e22" stroke="#c96b0a" stroke-width="1"/>
+  <text x="157" y="62" text-anchor="middle" font-size="8" fill="white">B3</text>
+  <line x1="166" y1="42" x2="166" y2="72" stroke="#c0392b" stroke-width="1.5" stroke-dasharray="3,2"/>
+  <rect x="166" y="46" width="18" height="22" rx="2" fill="#e67e22" stroke="#c96b0a" stroke-width="1"/>
+  <rect x="188" y="46" width="36" height="22" rx="3" fill="#aab7c4" stroke="#7f8c8d" stroke-width="1"/>
+  <text x="206" y="62" text-anchor="middle" font-size="9" fill="white">B4</text>
+  <rect x="228" y="46" width="36" height="22" rx="3" fill="#aab7c4" stroke="#7f8c8d" stroke-width="1"/>
+  <text x="246" y="62" text-anchor="middle" font-size="9" fill="white">B5</text>
+  <!-- B6 split -->
+  <rect x="268" y="46" width="18" height="22" rx="2" fill="#e67e22" stroke="#c96b0a" stroke-width="1"/>
+  <text x="277" y="62" text-anchor="middle" font-size="8" fill="white">B6</text>
+  <line x1="286" y1="42" x2="286" y2="72" stroke="#c0392b" stroke-width="1.5" stroke-dasharray="3,2"/>
+  <rect x="286" y="46" width="18" height="22" rx="2" fill="#e67e22" stroke="#c96b0a" stroke-width="1"/>
+  <rect x="308" y="46" width="36" height="22" rx="3" fill="#aab7c4" stroke="#7f8c8d" stroke-width="1"/>
+  <text x="326" y="62" text-anchor="middle" font-size="9" fill="white">B7</text>
+  <rect x="348" y="46" width="36" height="22" rx="3" fill="#aab7c4" stroke="#7f8c8d" stroke-width="1"/>
+  <text x="366" y="62" text-anchor="middle" font-size="9" fill="white">B8</text>
+  <rect x="388" y="46" width="36" height="22" rx="3" fill="#aab7c4" stroke="#7f8c8d" stroke-width="1"/>
+  <text x="406" y="62" text-anchor="middle" font-size="9" fill="white">B9</text>
+  <!-- legend -->
+  <line x1="440" y1="54" x2="456" y2="54" stroke="#c0392b" stroke-width="1.5" stroke-dasharray="3,2"/>
+  <text x="460" y="57" font-size="8.5" fill="#c0392b">boundary: split at record boundary, recompressed</text>
+  <rect x="440" y="64" width="11" height="10" fill="#8e44ad" rx="1"/>
+  <text x="455" y="73" font-size="8.5" fill="#8e44ad">HDR: broadcast to all workers</text>
+
+  <!-- split arrows -->
+  <text x="220" y="88" text-anchor="middle" font-size="9.5" fill="#475569">split into N=3 equal shards</text>
+  <line x1="107" y1="92" x2="107" y2="104" stroke="#555" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <line x1="284" y1="92" x2="284" y2="104" stroke="#555" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <line x1="461" y1="92" x2="461" y2="104" stroke="#555" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+  <!-- shard 1 -->
+  <text x="107" y="118" text-anchor="middle" font-size="8.5" fill="#555">shard 1</text>
+  <rect x="28"  y="122" width="36" height="20" rx="2" fill="#8e44ad" stroke="#6c3483" stroke-width="1"/>
+  <text x="46"  y="137" text-anchor="middle" font-size="8.5" fill="white" font-weight="bold">HDR</text>
+  <rect x="68"  y="122" width="36" height="20" rx="2" fill="#aab7c4" stroke="#7f8c8d" stroke-width="1"/>
+  <text x="86"  y="137" text-anchor="middle" font-size="8.5" fill="white">B1</text>
+  <rect x="108" y="122" width="36" height="20" rx="2" fill="#aab7c4" stroke="#7f8c8d" stroke-width="1"/>
+  <text x="126" y="137" text-anchor="middle" font-size="8.5" fill="white">B2</text>
+  <rect x="148" y="122" width="18" height="20" rx="2" fill="#e67e22" stroke="#c96b0a" stroke-width="1"/>
+  <text x="157" y="137" text-anchor="middle" font-size="7.5" fill="white">B3a</text>
+
+  <!-- shard 2 -->
+  <text x="284" y="118" text-anchor="middle" font-size="8.5" fill="#555">shard 2</text>
+  <rect x="204" y="122" width="36" height="20" rx="2" fill="#8e44ad" stroke="#6c3483" stroke-width="1"/>
+  <text x="222" y="137" text-anchor="middle" font-size="8.5" fill="white" font-weight="bold">HDR</text>
+  <rect x="244" y="122" width="18" height="20" rx="2" fill="#e67e22" stroke="#c96b0a" stroke-width="1"/>
+  <text x="253" y="137" text-anchor="middle" font-size="7.5" fill="white">B3b</text>
+  <rect x="266" y="122" width="36" height="20" rx="2" fill="#aab7c4" stroke="#7f8c8d" stroke-width="1"/>
+  <text x="284" y="137" text-anchor="middle" font-size="8.5" fill="white">B4</text>
+  <rect x="306" y="122" width="36" height="20" rx="2" fill="#aab7c4" stroke="#7f8c8d" stroke-width="1"/>
+  <text x="324" y="137" text-anchor="middle" font-size="8.5" fill="white">B5</text>
+  <rect x="346" y="122" width="18" height="20" rx="2" fill="#e67e22" stroke="#c96b0a" stroke-width="1"/>
+  <text x="355" y="137" text-anchor="middle" font-size="7.5" fill="white">B6a</text>
+
+  <!-- shard 3 -->
+  <text x="461" y="118" text-anchor="middle" font-size="8.5" fill="#555">shard 3</text>
+  <rect x="391" y="122" width="36" height="20" rx="2" fill="#8e44ad" stroke="#6c3483" stroke-width="1"/>
+  <text x="409" y="137" text-anchor="middle" font-size="8.5" fill="white" font-weight="bold">HDR</text>
+  <rect x="431" y="122" width="18" height="20" rx="2" fill="#e67e22" stroke="#c96b0a" stroke-width="1"/>
+  <text x="440" y="137" text-anchor="middle" font-size="7.5" fill="white">B6b</text>
+  <rect x="453" y="122" width="36" height="20" rx="2" fill="#aab7c4" stroke="#7f8c8d" stroke-width="1"/>
+  <text x="471" y="137" text-anchor="middle" font-size="8.5" fill="white">B7</text>
+  <rect x="493" y="122" width="36" height="20" rx="2" fill="#aab7c4" stroke="#7f8c8d" stroke-width="1"/>
+  <text x="511" y="137" text-anchor="middle" font-size="8.5" fill="white">B8</text>
+  <rect x="533" y="122" width="36" height="20" rx="2" fill="#aab7c4" stroke="#7f8c8d" stroke-width="1"/>
+  <text x="551" y="137" text-anchor="middle" font-size="8.5" fill="white">B9</text>
+
+  <!-- ── WORKER BOXES (between scatter and gather) ────────────── -->
+  <line x1="107" y1="144" x2="107" y2="158" stroke="#555" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <line x1="284" y1="144" x2="284" y2="158" stroke="#555" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <line x1="461" y1="144" x2="461" y2="158" stroke="#555" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+  <rect x="45"  y="160" width="124" height="34" rx="4" fill="#eaf4fb" stroke="#3498db" stroke-width="1.5"/>
+  <text x="107" y="174" text-anchor="middle" font-size="10" font-weight="bold" fill="#2171a8">worker 1</text>
+  <text x="107" y="187" text-anchor="middle" font-size="8.5" fill="#555">command</text>
+
+  <rect x="222" y="160" width="124" height="34" rx="4" fill="#eafaf1" stroke="#27ae60" stroke-width="1.5"/>
+  <text x="284" y="174" text-anchor="middle" font-size="10" font-weight="bold" fill="#1a7a42">worker 2</text>
+  <text x="284" y="187" text-anchor="middle" font-size="8.5" fill="#555">command</text>
+
+  <rect x="399" y="160" width="124" height="34" rx="4" fill="#fef9e7" stroke="#e67e22" stroke-width="1.5"/>
+  <text x="461" y="174" text-anchor="middle" font-size="10" font-weight="bold" fill="#b35e00">worker 3</text>
+  <text x="461" y="187" text-anchor="middle" font-size="8.5" fill="#555">command</text>
+
+  <!-- ================================================================
+       blocky gather box  (title: top-right, covers outputs + final row)
+  ================================================================ -->
+  <rect x="18" y="198" width="640" height="120" rx="6"
+        fill="#f0fdf4" stroke="#86efac" stroke-width="1.5"/>
+  <!-- top-right title chip -->
+  <rect x="560" y="191" width="80" height="14" rx="3" fill="#86efac"/>
+  <text x="600" y="202" text-anchor="middle" font-size="9.5" font-weight="bold" fill="#14532d">blocky gather</text>
+
+  <!-- arrows from workers into gather box -->
+  <line x1="107" y1="196" x2="107" y2="210" stroke="#555" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <line x1="284" y1="196" x2="284" y2="210" stroke="#555" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <line x1="461" y1="196" x2="461" y2="210" stroke="#555" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+  <!-- per-worker output blocks (30px wide to leave room for HDR) -->
+  <!-- worker 1: HDR + O1 O2 O3 (blue) — group centre ≈107 -->
+  <rect x="41"  y="212" width="30" height="20" rx="2" fill="#8e44ad" stroke="#6c3483" stroke-width="1"/>
+  <text x="56"  y="227" text-anchor="middle" font-size="8" fill="white" font-weight="bold">HDR</text>
+  <rect x="75"  y="212" width="30" height="20" rx="2" fill="#3498db" stroke="#2171a8" stroke-width="1"/>
+  <text x="90"  y="227" text-anchor="middle" font-size="8.5" fill="white">O1</text>
+  <rect x="109" y="212" width="30" height="20" rx="2" fill="#3498db" stroke="#2171a8" stroke-width="1"/>
+  <text x="124" y="227" text-anchor="middle" font-size="8.5" fill="white">O2</text>
+  <rect x="143" y="212" width="30" height="20" rx="2" fill="#3498db" stroke="#2171a8" stroke-width="1"/>
+  <text x="158" y="227" text-anchor="middle" font-size="8.5" fill="white">O3</text>
+  <!-- worker 2: HDR + O4 O5 O6 (green) — group centre ≈284 -->
+  <rect x="218" y="212" width="30" height="20" rx="2" fill="#8e44ad" stroke="#6c3483" stroke-width="1"/>
+  <text x="233" y="227" text-anchor="middle" font-size="8" fill="white" font-weight="bold">HDR</text>
+  <rect x="252" y="212" width="30" height="20" rx="2" fill="#27ae60" stroke="#1a7a42" stroke-width="1"/>
+  <text x="267" y="227" text-anchor="middle" font-size="8.5" fill="white">O4</text>
+  <rect x="286" y="212" width="30" height="20" rx="2" fill="#27ae60" stroke="#1a7a42" stroke-width="1"/>
+  <text x="301" y="227" text-anchor="middle" font-size="8.5" fill="white">O5</text>
+  <rect x="320" y="212" width="30" height="20" rx="2" fill="#27ae60" stroke="#1a7a42" stroke-width="1"/>
+  <text x="335" y="227" text-anchor="middle" font-size="8.5" fill="white">O6</text>
+  <!-- worker 3: HDR + O7 O8 O9 (amber) — group centre ≈461 -->
+  <rect x="395" y="212" width="30" height="20" rx="2" fill="#8e44ad" stroke="#6c3483" stroke-width="1"/>
+  <text x="410" y="227" text-anchor="middle" font-size="8" fill="white" font-weight="bold">HDR</text>
+  <rect x="429" y="212" width="30" height="20" rx="2" fill="#e67e22" stroke="#b35e00" stroke-width="1"/>
+  <text x="444" y="227" text-anchor="middle" font-size="8.5" fill="white">O7</text>
+  <rect x="463" y="212" width="30" height="20" rx="2" fill="#e67e22" stroke="#b35e00" stroke-width="1"/>
+  <text x="478" y="227" text-anchor="middle" font-size="8.5" fill="white">O8</text>
+  <rect x="497" y="212" width="30" height="20" rx="2" fill="#e67e22" stroke="#b35e00" stroke-width="1"/>
+  <text x="512" y="227" text-anchor="middle" font-size="8.5" fill="white">O9</text>
+
+  <!-- converge -->
+  <polyline points="107,234 107,252 284,252" fill="none" stroke="#555" stroke-width="1.2"/>
+  <polyline points="461,234 461,252 284,252" fill="none" stroke="#555" stroke-width="1.2"/>
+  <line x1="284" y1="252" x2="284" y2="264" stroke="#555" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <text x="460" y="249" font-size="8.5" fill="#555">concat BGZF streams</text>
+
+  <!-- final output row: HDR from shard 1 kept, shards 2+3 headers stripped -->
+  <text x="28" y="280" font-size="9.5" font-weight="bold" fill="#334155">Output (VCF.gz)</text>
+  <rect x="28"  y="284" width="30" height="20" rx="2" fill="#8e44ad" stroke="#6c3483" stroke-width="1"/>
+  <text x="43"  y="299" text-anchor="middle" font-size="8" fill="white" font-weight="bold">HDR</text>
+  <rect x="62"  y="284" width="30" height="20" rx="2" fill="#3498db" stroke="#2171a8" stroke-width="1"/>
+  <text x="77"  y="299" text-anchor="middle" font-size="8.5" fill="white">O1</text>
+  <rect x="96"  y="284" width="30" height="20" rx="2" fill="#3498db" stroke="#2171a8" stroke-width="1"/>
+  <text x="111" y="299" text-anchor="middle" font-size="8.5" fill="white">O2</text>
+  <rect x="130" y="284" width="30" height="20" rx="2" fill="#3498db" stroke="#2171a8" stroke-width="1"/>
+  <text x="145" y="299" text-anchor="middle" font-size="8.5" fill="white">O3</text>
+  <rect x="164" y="284" width="30" height="20" rx="2" fill="#27ae60" stroke="#1a7a42" stroke-width="1"/>
+  <text x="179" y="299" text-anchor="middle" font-size="8.5" fill="white">O4</text>
+  <rect x="198" y="284" width="30" height="20" rx="2" fill="#27ae60" stroke="#1a7a42" stroke-width="1"/>
+  <text x="213" y="299" text-anchor="middle" font-size="8.5" fill="white">O5</text>
+  <rect x="232" y="284" width="30" height="20" rx="2" fill="#27ae60" stroke="#1a7a42" stroke-width="1"/>
+  <text x="247" y="299" text-anchor="middle" font-size="8.5" fill="white">O6</text>
+  <rect x="266" y="284" width="30" height="20" rx="2" fill="#e67e22" stroke="#b35e00" stroke-width="1"/>
+  <text x="281" y="299" text-anchor="middle" font-size="8.5" fill="white">O7</text>
+  <rect x="300" y="284" width="30" height="20" rx="2" fill="#e67e22" stroke="#b35e00" stroke-width="1"/>
+  <text x="315" y="299" text-anchor="middle" font-size="8.5" fill="white">O8</text>
+  <rect x="334" y="284" width="30" height="20" rx="2" fill="#e67e22" stroke="#b35e00" stroke-width="1"/>
+  <text x="349" y="299" text-anchor="middle" font-size="8.5" fill="white">O9</text>
+
+  <!-- ── Note ──────────────────────────────────────────────── -->
+  <rect x="8" y="335" width="660" height="52" rx="6" fill="#fefce8" stroke="#fde047" stroke-width="1"/>
+  <text x="20" y="351" font-size="9" fill="#713f12">
+    <tspan font-weight="bold">blocky run</tspan>
+    <tspan> and </tspan>
+    <tspan font-weight="bold">blocky scatter</tspan>
+    <tspan> use identical splitting logic. </tspan>
+    <tspan font-weight="bold">scatter</tspan>
+    <tspan> writes each chunk as a shard file; </tspan>
+    <tspan font-weight="bold">run</tspan>
+    <tspan> streams each chunk to a worker subprocess via stdin.</tspan>
+  </text>
+  <text x="20" y="365" font-size="9" fill="#713f12">
+    <tspan>In both cases, worker output is written to temporary files, then concatenated by </tspan>
+    <tspan font-weight="bold">gather</tspan>
+    <tspan> (explicit) or internally by </tspan>
+    <tspan font-weight="bold">run</tspan>
+    <tspan>.</tspan>
+  </text>
+  <text x="20" y="379" font-size="9" fill="#713f12">
+    <tspan font-weight="bold">scatter / gather</tspan>
+    <tspan> exposes each step separately, allowing workers to run across multiple nodes.</tspan>
+  </text>
+
+</svg>

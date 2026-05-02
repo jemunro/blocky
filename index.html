@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>blocky - fast parallel VCF, BCF and BGZF processing for bioinformatics</title>
+  <meta name="description" content="blocky splits bgzipped files (VCF, BCF, BED, GFF) along BGZF block boundaries and sends each shard through a parallel bioinformatics pipeline. Works with bcftools, vcfanno, VEP and more." />
+  <meta property="og:title" content="blocky — Parallel BGZF Scatter &amp; Gather for VCF, BCF, BED and GFF" />
+  <meta property="og:description" content="blocky splits bgzipped files (VCF, BCF, BED, GFF) along BGZF block boundaries and sends each shard through a parallel bioinformatics pipeline. Works with bcftools, vcfanno, VEP and more." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://jemunro.github.io/blocky/" />
+  <link rel="canonical" href="https://jemunro.github.io/blocky/" />
+  <style>
+    :root {
+      --bg: #1a1b26;
+      --bg-alt: #24283b;
+      --fg: #c0caf5;
+      --fg-dim: #9aa5ce;
+      --accent: #7aa2f7;
+      --accent2: #bb9af7;
+      --green: #9ece6a;
+      --orange: #ff9e64;
+      --red: #f7768e;
+      --border: #3b4261;
+      --code-bg: #1f2335;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html {
+      font-size: 16px;
+      scroll-behavior: smooth;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                   "Helvetica Neue", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      line-height: 1.7;
+      max-width: 52rem;
+      margin: 0 auto;
+      padding: 2rem 1.5rem 4rem;
+    }
+
+    h1, h2, h3, h4, h5, h6 {
+      color: var(--accent);
+      margin-top: 2rem;
+      margin-bottom: 0.75rem;
+      line-height: 1.3;
+    }
+
+    h1 { font-size: 2rem; border-bottom: 2px solid var(--border); padding-bottom: 0.4rem; }
+    h2 { font-size: 1.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; }
+    h3 { font-size: 1.25rem; color: var(--accent2); }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    p { margin-bottom: 1rem; }
+
+    hr {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 2rem 0;
+    }
+
+    code {
+      font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
+      font-size: 0.9em;
+      background: var(--code-bg);
+      padding: 0.15em 0.4em;
+      border-radius: 4px;
+    }
+
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1rem 1.25rem;
+      overflow-x: auto;
+      margin-bottom: 1rem;
+    }
+
+    pre code {
+      background: none;
+      padding: 0;
+      font-size: 0.85em;
+      line-height: 1.5;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 1rem;
+    }
+
+    th, td {
+      text-align: left;
+      padding: 0.5rem 0.75rem;
+      border: 1px solid var(--border);
+    }
+
+    th {
+      background: var(--bg-alt);
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    tr:nth-child(even) { background: var(--bg-alt); }
+
+    blockquote {
+      border-left: 3px solid var(--accent2);
+      padding: 0.5rem 1rem;
+      margin: 0 0 1rem;
+      color: var(--fg-dim);
+      background: var(--bg-alt);
+      border-radius: 0 4px 4px 0;
+    }
+
+    ul, ol {
+      margin-bottom: 1rem;
+      padding-left: 1.5rem;
+    }
+
+    li { margin-bottom: 0.25rem; }
+
+    img {
+      max-width: 100%;
+      height: auto;
+      border-radius: 6px;
+    }
+
+    strong { color: var(--fg); }
+
+    /* Pandoc syntax highlighting overrides for dark theme */
+    .sourceCode { background: var(--code-bg); }
+    code span.kw { color: var(--accent2); font-weight: bold; }  /* Keyword */
+    code span.dt { color: var(--green); }                        /* DataType */
+    code span.st { color: var(--green); }                        /* String */
+    code span.co { color: var(--fg-dim); font-style: italic; }  /* Comment */
+    code span.op { color: var(--fg); }                           /* Operator */
+    code span.fu { color: var(--accent); }                       /* Function */
+    code span.va { color: var(--orange); }                       /* Variable */
+    code span.cf { color: var(--accent2); }                      /* ControlFlow */
+    code span.al { color: var(--red); font-weight: bold; }      /* Alert */
+    code span.er { color: var(--red); font-weight: bold; }      /* Error */
+    code span.bn { color: var(--orange); }                       /* BaseN */
+    code span.dv { color: var(--orange); }                       /* DecVal */
+
+    .site-header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--bg-alt);
+      border-bottom: 1px solid var(--border);
+      padding: 0.5rem 1.5rem;
+      margin: -2rem -1.5rem 2rem;
+      font-size: 0.9rem;
+    }
+
+    .site-header .site-name {
+      font-weight: 700;
+      color: var(--accent);
+      font-size: 1.1rem;
+    }
+
+    .site-header .github-link {
+      color: var(--fg-dim);
+    }
+
+    .site-header .github-link:hover {
+      color: var(--accent);
+    }
+
+    @media (max-width: 600px) {
+      body { padding: 1rem; }
+      .site-header { margin: -1rem -1rem 1.5rem; padding: 0.5rem 1rem; }
+      h1 { font-size: 1.5rem; }
+      pre { padding: 0.75rem; }
+    }
+  </style>
+</head>
+<body>
+<header class="site-header">
+  <span class="site-name">blocky</span>
+  <a class="github-link" href="https://github.com/jemunro/blocky">View on GitHub &rarr;</a>
+</header>
+<h1
+id="blocky---fast-parallel-vcf-bcf-and-bgzf-processing-for-bioinformatics">blocky
+- fast parallel VCF, BCF and BGZF processing for bioinformatics</h1>
+<p>Parallelise processing of bgzipped files by splitting along BGZF
+block boundaries and piping each shard through a tool pipeline
+concurrently. Works with any BGZF+TBI/CSI file: VCF, BCF, BED, GFF, GTF,
+TSV, or any newline-delimited bgzipped format.</p>
+<hr />
+<h2 id="how-it-works">How it works</h2>
+<p><img src="docs/blocky_diagram.svg" alt="blocky diagram" /></p>
+<p>A bgzipped file is a sequence of independent BGZF blocks, each
+containing up to 64 KiB of uncompressed data. Because blocks are
+self-contained, any block boundary is a valid split point -- the file
+can be divided into shards without decompressing the data in
+between.</p>
+<p>When an index is present (TBI, CSI, or GZI), blocky uses it to locate
+block offsets and divide the file into equal-sized shards. Without an
+index, blocky scans the BGZF blocks directly — this works for any
+bgzipped file but is slightly slower as the file must be read
+sequentially to find split points. BCF files always require a CSI index.
+With <code>blocky scatter</code>, each shard file receives a
+recompressed header and a recompressed boundary block; all blocks in
+between are byte-copied directly from disk without decompression. With
+<code>blocky run</code>, the shard data is decompressed and streamed to
+the worker subprocess via stdin.</p>
+<p>Only one block per split point is ever decompressed and recompressed.
+For a file split into N shards, that is N-1 boundary blocks regardless
+of file size.</p>
+<hr />
+<h2 id="installation">Installation</h2>
+<h3 id="precompiled-binary-recommended">Precompiled binary
+(recommended)</h3>
+<p>Download the latest Linux x86_64 binary from the <a
+href="https://github.com/jemunro/blocky/releases/latest">latest
+release</a>:</p>
+<div class="sourceCode" id="cb1"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-fsSL</span> https://github.com/jemunro/blocky/releases/latest/download/blocky <span class="at">-o</span> blocky</span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="fu">chmod</span> +x blocky</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="fu">mv</span> blocky /usr/local/bin/  <span class="co"># or anywhere on your PATH</span></span></code></pre></div>
+<p>The binary is statically linked and ~400 kB.</p>
+<h3 id="docker-images">Docker images</h3>
+<p>Pre-built images with common bioinformatics tools are available from
+GHCR:</p>
+<div class="sourceCode" id="cb2"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> pull ghcr.io/jemunro/blocky/blocky-bcftools:latest</span></code></pre></div>
+<hr />
+<h2 id="quick-start">Quick start</h2>
+<div class="sourceCode" id="cb3"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Split a VCF into 8 shards</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="ex">blocky</span> scatter <span class="at">-n</span> 8 <span class="at">-o</span> output_{}.vcf.gz input.vcf.gz</span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Filter in parallel (4 workers, each processing 2 shards sequentially)</span></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a><span class="ex">blocky</span> run <span class="at">-n</span> 4 <span class="at">-m</span> 2 <span class="at">-o</span> filtered.vcf.gz input.vcf.gz <span class="dt">\</span></span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>  ::: bcftools view <span class="at">-i</span> <span class="st">&quot;GT=&#39;alt&#39;&quot;</span> <span class="at">-Oz</span></span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a><span class="co"># Tool-managed output: tool writes per-shard files using {} placeholder</span></span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a><span class="ex">blocky</span> run <span class="at">-n</span> 8 input.vcf.gz <span class="dt">\</span></span>
+<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a>  ::: bcftools view <span class="at">-i</span> <span class="st">&quot;GT=&#39;alt&#39;&quot;</span> <span class="at">-Oz</span> <span class="at">-o</span> output.{}.vcf.gz</span>
+<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a><span class="co"># Process a BED file</span></span>
+<span id="cb3-13"><a href="#cb3-13" aria-hidden="true" tabindex="-1"></a><span class="ex">blocky</span> run <span class="at">-n</span> 4 <span class="at">--clamp</span> <span class="at">-o</span> out.bed.gz input.bed.gz ::: cat</span>
+<span id="cb3-14"><a href="#cb3-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-15"><a href="#cb3-15" aria-hidden="true" tabindex="-1"></a><span class="co"># Compress/decompress (like bgzip)</span></span>
+<span id="cb3-16"><a href="#cb3-16" aria-hidden="true" tabindex="-1"></a><span class="ex">blocky</span> compress input.vcf</span>
+<span id="cb3-17"><a href="#cb3-17" aria-hidden="true" tabindex="-1"></a><span class="ex">blocky</span> decompress input.vcf.gz</span></code></pre></div>
+<hr />
+<h2 id="subcommands">Subcommands</h2>
+<h3 id="scatter"><code>scatter</code></h3>
+<p>Split input into N shards. Each shard is a valid standalone file with
+its own header.</p>
+<pre><code>blocky scatter -n &lt;n_shards&gt; -o &lt;output&gt; [options] &lt;input&gt;</code></pre>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-n</code>/<code>--n-shards</code></td>
+<td>Number of shards (required, &gt;= 1)</td>
+</tr>
+<tr>
+<td><code>-o</code>/<code>--output</code></td>
+<td>Output path template (required). Use <code>{}</code> for shard
+number.</td>
+</tr>
+<tr>
+<td><code>-t</code>/<code>--max-threads</code></td>
+<td>Max threads for scatter (default: min(n, 8))</td>
+</tr>
+<tr>
+<td><code>--scan</code></td>
+<td>Ignore index, scan all BGZF blocks (not valid for BCF)</td>
+</tr>
+<tr>
+<td><code>--clamp</code></td>
+<td>Reduce -n if fewer split points available (instead of erroring)</td>
+</tr>
+<tr>
+<td><code>-v</code>/<code>--verbose</code></td>
+<td>Print progress to stderr</td>
+</tr>
+</tbody>
+</table>
+<div class="sourceCode" id="cb5"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="ex">blocky</span> scatter <span class="at">-n</span> 4 <span class="at">-o</span> output.{}.vcf.gz input.vcf.gz</span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="co"># -&gt; output.1.vcf.gz  output.2.vcf.gz  output.3.vcf.gz  output.4.vcf.gz</span></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a><span class="ex">blocky</span> scatter <span class="at">-n</span> 4 <span class="at">-o</span> output.bcf input.bcf</span></code></pre></div>
+<p><strong>Index priority</strong>: CSI &gt; TBI &gt; GZI &gt; block
+scan. BCF requires a CSI index. VCF/text uses whichever index is found;
+if none, blocks are scanned directly (with a warning).</p>
+<hr />
+<h3 id="run"><code>run</code></h3>
+<p>Scatter and pipe each shard through a tool pipeline in parallel.
+Workers pull shards from a shared queue; a concat thread reassembles
+output in order.</p>
+<pre><code>blocky run -n &lt;n_workers&gt; [-m &lt;shards_per_worker&gt;] [options] &lt;input&gt; ::: &lt;cmd&gt; [args...]</code></pre>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-n</code>/<code>--n-workers</code></td>
+<td>Number of concurrent worker pipelines (required, &gt;= 1)</td>
+</tr>
+<tr>
+<td><code>-m</code>/<code>--max-shards-per-worker</code></td>
+<td>Max shards each worker processes sequentially (default: 1)</td>
+</tr>
+<tr>
+<td><code>-o</code>/<code>--output</code></td>
+<td>Output path (optional; absent -&gt; stdout)</td>
+</tr>
+<tr>
+<td><code>-u</code>/<code>--uncompressed</code></td>
+<td>Force uncompressed file output</td>
+</tr>
+<tr>
+<td><code>--discard</code></td>
+<td>Discard subprocess stdout (tool manages own output)</td>
+</tr>
+<tr>
+<td><code>--discard-stderr</code></td>
+<td>Discard subprocess stderr</td>
+</tr>
+<tr>
+<td><code>-t</code>/<code>--max-threads</code></td>
+<td>Max scatter threads (default: min(n-workers, 8))</td>
+</tr>
+<tr>
+<td><code>--scan</code></td>
+<td>Ignore index, scan all BGZF blocks</td>
+</tr>
+<tr>
+<td><code>--clamp</code></td>
+<td>Reduce shard count if fewer split points available</td>
+</tr>
+<tr>
+<td><code>--no-kill</code></td>
+<td>On failure, let sibling shards finish (default: kill them)</td>
+</tr>
+<tr>
+<td><code>-v</code>/<code>--verbose</code></td>
+<td>Print per-shard progress to stderr</td>
+</tr>
+</tbody>
+</table>
+<p>Total shards = <code>n * m</code>. Each worker processes up to
+<code>m</code> shards sequentially. The concat thread writes shard
+outputs to <code>-o</code> (or stdout) in order, stripping duplicate
+headers from shards 2..N.</p>
+<div class="sourceCode" id="cb7"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="co"># 4 workers, 2 shards each = 8 total shards</span></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a><span class="ex">blocky</span> run <span class="at">-n</span> 4 <span class="at">-m</span> 2 <span class="at">-o</span> filtered.vcf.gz input.vcf.gz <span class="dt">\</span></span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a>  ::: bcftools view <span class="at">-i</span> <span class="st">&quot;GT=&#39;alt&#39;&quot;</span> <span class="at">-Oz</span></span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a><span class="co"># Output to stdout (no -o)</span></span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a><span class="ex">blocky</span> run <span class="at">-n</span> 4 input.vcf.gz ::: bcftools view <span class="at">-Ov</span> <span class="kw">|</span> <span class="fu">wc</span> <span class="at">-l</span></span>
+<span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-8"><a href="#cb7-8" aria-hidden="true" tabindex="-1"></a><span class="co"># Force uncompressed output</span></span>
+<span id="cb7-9"><a href="#cb7-9" aria-hidden="true" tabindex="-1"></a><span class="ex">blocky</span> run <span class="at">-n</span> 4 <span class="at">-u</span> <span class="at">-o</span> filtered.vcf input.vcf.gz <span class="dt">\</span></span>
+<span id="cb7-10"><a href="#cb7-10" aria-hidden="true" tabindex="-1"></a>  ::: bcftools view <span class="at">-Ov</span></span></code></pre></div>
+<p><strong>Subprocess stdin</strong> is always decompressed (raw bytes).
+The interceptor thread detects the subprocess output format (BGZF or
+uncompressed) and handles header stripping and recompression
+automatically.</p>
+<hr />
+<h3 id="gather"><code>gather</code></h3>
+<p>Concatenate pre-existing shard files into a single output. Raw block
+copy with header stripping on shards 2..N.</p>
+<pre><code>blocky gather [-o &lt;output&gt;] [options] &lt;shard1&gt; [&lt;shard2&gt; ...]</code></pre>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-o</code>/<code>--output</code></td>
+<td>Output path (optional; absent -&gt; stdout)</td>
+</tr>
+<tr>
+<td><code>-v</code>/<code>--verbose</code></td>
+<td>Print progress to stderr</td>
+</tr>
+</tbody>
+</table>
+<div class="sourceCode" id="cb9"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="ex">blocky</span> gather <span class="at">-o</span> merged.vcf.gz shard_<span class="pp">*</span>.vcf.gz</span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a><span class="ex">blocky</span> gather shard_<span class="pp">*</span>.vcf.gz <span class="kw">|</span> <span class="ex">bcftools</span> stats</span></code></pre></div>
+<p>For VCF/BCF, the <code>#CHROM</code> line is validated byte-for-byte
+across all shards before writing. A mismatch exits with code 1 and no
+partial output is written.</p>
+<hr />
+<h3 id="compress--decompress"><code>compress</code> /
+<code>decompress</code></h3>
+<p>BGZF compression and decompression using blocky's libdeflate engine.
+Output is compatible with <code>bgzip</code> and <code>htslib</code>.
+Matches <code>bgzip</code> behavior: the input file is removed after
+successful operation.</p>
+<pre><code>blocky compress   [-c] [file]
+blocky decompress [-c] [file]</code></pre>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-c</code>/<code>--stdout</code></td>
+<td>Write to stdout, keep original file</td>
+</tr>
+</tbody>
+</table>
+<div class="sourceCode" id="cb11"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="ex">blocky</span> compress data.vcf       <span class="co"># -&gt; data.vcf.gz (removes data.vcf)</span></span>
+<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a><span class="ex">blocky</span> decompress data.vcf.gz  <span class="co"># -&gt; data.vcf (removes data.vcf.gz)</span></span>
+<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span> data.vcf <span class="kw">|</span> <span class="ex">blocky</span> compress <span class="at">-c</span> <span class="kw">|</span> <span class="ex">blocky</span> decompress <span class="at">-c</span>  <span class="co"># pipe mode</span></span></code></pre></div>
+<p>Errors if the output file already exists. Warns if compressing an
+already-compressed file or decompressing a non-compressed file.</p>
+<p>These subcommands are included for convenience, e.g. on systems
+without htslib.</p>
+<hr />
+<h2 id="-placeholder-and---discard"><code>{}</code> placeholder and
+<code>--discard</code></h2>
+<p><code>{}</code> in the tool command is replaced with the zero-padded
+shard number. This works in all modes -- you can use <code>{}</code> for
+auxiliary output files (reports, logs) while still capturing stdout via
+<code>-o</code>.</p>
+<div class="sourceCode" id="cb12"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Tool manages its own output files -- use --discard to drop stdout</span></span>
+<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a><span class="ex">blocky</span> run <span class="at">-n</span> 8 <span class="at">--discard</span> input.vcf.gz <span class="dt">\</span></span>
+<span id="cb12-3"><a href="#cb12-3" aria-hidden="true" tabindex="-1"></a>  ::: bcftools view <span class="at">-Oz</span> <span class="at">-o</span> output.{}.vcf.gz</span>
+<span id="cb12-4"><a href="#cb12-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-5"><a href="#cb12-5" aria-hidden="true" tabindex="-1"></a><span class="co"># {} for auxiliary files, stdout captured to -o</span></span>
+<span id="cb12-6"><a href="#cb12-6" aria-hidden="true" tabindex="-1"></a><span class="ex">blocky</span> run <span class="at">-n</span> 4 <span class="at">-o</span> annotated.vcf.gz input.vcf.gz <span class="dt">\</span></span>
+<span id="cb12-7"><a href="#cb12-7" aria-hidden="true" tabindex="-1"></a>  ::: vep <span class="at">--stats_file</span> report.{}.html</span></code></pre></div>
+<p>To pass a literal <code>{}</code> to a tool, escape as
+<code>\{}</code> (use single quotes: <code>'\{}'</code>).</p>
+<table>
+<thead>
+<tr>
+<th><code>-o</code></th>
+<th><code>--discard</code></th>
+<th>Mode</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Yes</td>
+<td>No</td>
+<td>File output (concat thread writes to <code>-o</code>)</td>
+</tr>
+<tr>
+<td>No</td>
+<td>No</td>
+<td>Stdout output</td>
+</tr>
+<tr>
+<td>No</td>
+<td>Yes</td>
+<td>Discard stdout (tool manages own output)</td>
+</tr>
+<tr>
+<td>Yes</td>
+<td>Yes</td>
+<td>Error (mutually exclusive)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="output-file-naming">Output file naming</h2>
+<p><code>{}</code> in the <code>-o</code> template is replaced with the
+zero-padded shard number:</p>
+<pre><code>-o output.{}.vcf.gz, -n 8   -&gt;  output.1.vcf.gz ... output.8.vcf.gz
+-o /results/{}/out.bcf       -&gt;  /results/1/out.bcf ... /results/4/out.bcf</code></pre>
+<p>Parent directories are created automatically.</p>
+<hr />
+<h2 id="supported-formats">Supported formats</h2>
+<table>
+<thead>
+<tr>
+<th>Format</th>
+<th>Index</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>bgzipped VCF (<code>.vcf.gz</code>)</td>
+<td>TBI, CSI, or GZI</td>
+<td>Auto-scan if no index (with warning)</td>
+</tr>
+<tr>
+<td>BCF (<code>.bcf</code>)</td>
+<td>CSI required</td>
+<td>No scan fallback</td>
+</tr>
+<tr>
+<td>BED, GFF, GTF, TSV (<code>.bed.gz</code>, <code>.gtf.gz</code>,
+etc.)</td>
+<td>TBI, CSI, or GZI</td>
+<td><code>#</code>-prefixed header lines stripped automatically</td>
+</tr>
+</tbody>
+</table>
+<p>Format is detected from file content (magic bytes), not from
+extension. Any BGZF file with <code>#</code>-prefixed headers works out
+of the box.</p>
+<hr />
+<h2 id="pipeline-separator">Pipeline separator</h2>
+<p><code>:::</code> (or <code>---</code>) separates pipeline stages.
+Stages are joined with <code>|</code> and executed via
+<code>sh -c</code>.</p>
+<div class="sourceCode" id="cb14"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="ex">blocky</span> run <span class="at">-n</span> 8 <span class="at">-o</span> out.vcf.gz input.vcf.gz <span class="dt">\</span></span>
+<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a>  ::: bcftools view <span class="at">-i</span> <span class="st">&quot;GT=&#39;alt&#39;&quot;</span> <span class="at">-Ou</span> <span class="dt">\</span></span>
+<span id="cb14-3"><a href="#cb14-3" aria-hidden="true" tabindex="-1"></a>  ::: bcftools view <span class="at">-s</span> Sample <span class="at">-Oz</span></span></code></pre></div>
+<hr />
+<h2 id="performance">Performance</h2>
+<ul>
+<li>With <code>blocky scatter</code>, middle BGZF blocks are byte-copied
+at disk bandwidth with no decompression; <code>blocky run</code>
+decompresses all blocks to stream raw bytes to workers</li>
+<li>Only N-1 boundary blocks are decompressed per scatter (one per split
+point)</li>
+<li>Worker pool model: <code>-n</code> workers pull from a shared shard
+queue, keeping all cores busy even when shard processing times vary</li>
+<li>Tmp shard files are BGZF-compressed (saves disk), decompressed
+on-the-fly during concat if <code>-u</code> is set</li>
+<li>For CPU-heavy tools (VEP, GATK), combine blocky's <code>-n</code>
+with the tool's own threading</li>
+</ul>
+<hr />
+<h2 id="limitations">Limitations</h2>
+<ul>
+<li>BCF requires a CSI index (<code>bcftools index input.bcf</code>). No
+scan fallback for BCF.</li>
+<li>Tools must read from stdin and write to stdout (or use
+<code>{}</code> for tool-managed output).</li>
+<li>Format conversion (VCF &lt;-&gt; BCF) is the pipeline's
+responsibility.</li>
+<li>BAM/CRAM are explicitly not supported -- reads span block
+boundaries, making block-level splitting produce incorrect results.</li>
+</ul>
+<hr />
+<h2 id="contributing">Contributing</h2>
+<p>Pull requests are welcome. Please follow these guidelines:</p>
+<ul>
+<li><strong>CI must pass.</strong> All PRs run the test suite
+automatically via GitHub Actions.</li>
+<li><strong>Add tests for new features.</strong> New functionality
+should include tests in the appropriate <code>tests/test_*.nim</code>
+file. Bug fixes should add a regression test where practical.</li>
+<li><strong>Run tests locally before pushing:</strong>
+<code>nimble test</code> (requires <code>bcftools</code>,
+<code>bgzip</code>, and <code>tabix</code> on <code>PATH</code>).</li>
+<li><strong>Keep changes focused.</strong> One feature or fix per PR.
+Avoid unrelated refactoring in the same PR.</li>
+<li><strong>No new dependencies</strong> without prior discussion.</li>
+</ul>
+<h3 id="building-from-source">Building from source</h3>
+<div class="sourceCode" id="cb15"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> clone <span class="at">--recurse-submodules</span> https://github.com/jemunro/blocky</span>
+<span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> blocky</span>
+<span id="cb15-3"><a href="#cb15-3" aria-hidden="true" tabindex="-1"></a><span class="ex">nimble</span> build              <span class="co"># debug build</span></span>
+<span id="cb15-4"><a href="#cb15-4" aria-hidden="true" tabindex="-1"></a><span class="ex">nimble</span> release            <span class="co"># release build (optimised, stripped)</span></span>
+<span id="cb15-5"><a href="#cb15-5" aria-hidden="true" tabindex="-1"></a><span class="ex">nimble</span> test               <span class="co"># run all tests</span></span>
+<span id="cb15-6"><a href="#cb15-6" aria-hidden="true" tabindex="-1"></a><span class="ex">nim</span> c <span class="at">-r</span> tests/test_scatter.nim   <span class="co"># run a single test file</span></span></code></pre></div>
+<p><strong>Build requirements:</strong> Nim &gt;= 2.0, cmake, a C
+compiler (gcc or clang).</p>
+<p><strong>Test requirements:</strong> <code>bcftools</code>,
+<code>bgzip</code>, <code>tabix</code> (from htslib). Test fixtures are
+generated automatically on first run via
+<code>tests/generate_fixtures.sh</code>.</p>
+<hr />
+<p>Blocky started as a Python prototype and was built into a portable,
+statically-linked Nim binary using <a
+href="https://claude.ai/code">Claude Code</a>.</p>
+</body>
+</html>
