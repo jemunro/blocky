@@ -298,6 +298,9 @@ proc copyRange*(outFd, inFd: cint; count: Off; startOffset: Off = 0) =
     curInOff += n.Off
     curOutOff += n.Off
     copied += n.Off
+  # pwrite doesn't advance the fd position — seek to where we finished
+  # so callers that use write() afterwards continue at the right offset.
+  discard posix.lseek(outFd, curOutOff, SEEK_SET)
 
 proc copyRangeFromFile*(srcPath: string; dstFd: cint; start: int64; length: int64) =
   ## Copy length bytes from srcPath[start..] to dstFd.

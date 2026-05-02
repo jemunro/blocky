@@ -505,6 +505,47 @@ timed("B25", "copyRangeFromFile: round-trip identity"):
   removeFile(tmpSrc)
   removeFile(tmpDst)
 
+# ---------------------------------------------------------------------------
+# B26 — copyRange pwrite tier: verify fd position advances after copy
+# ---------------------------------------------------------------------------
+
+timed("B26", "copyRange: pwrite tier advances fd position"):
+  gTierCopyFileRangeFailed.store(true, moRelaxed)
+  gTierSendfileFailed.store(true, moRelaxed)
+  let tmpSrc = getTempDir() / "blocky_test_pos_src.bin"
+  let tmpDst = getTempDir() / "blocky_test_pos_dst.bin"
+  const SrcSize = 256 * 1024
+  const CopyStart = 1024
+  const CopyLen = 100 * 1024
+  var srcData = newSeqUninit[byte](SrcSize)
+  for i in 0 ..< SrcSize: srcData[i] = byte(i and 0xFF)
+  block:
+    let f = open(tmpSrc, fmWrite)
+    discard f.writeBytes(srcData, 0, SrcSize)
+    f.close()
+  # Write prefix, copyRange, write suffix — all to the same fd.
+  let prefix = [byte 0xAA, 0xBB, 0xCC, 0xDD]
+  let suffix = [byte 0x11, 0x22, 0x33, 0x44]
+  let srcFd = posix.open(tmpSrc.cstring, O_RDONLY)
+  let dstFd = posix.open(tmpDst.cstring, O_WRONLY or O_CREAT or O_TRUNC, 0o666.Mode)
+  doAssert srcFd >= 0 and dstFd >= 0
+  discard posix.write(dstFd, unsafeAddr prefix[0], prefix.len)
+  copyRange(dstFd, srcFd, CopyLen.Off, CopyStart.Off)
+  discard posix.write(dstFd, unsafeAddr suffix[0], suffix.len)
+  discard posix.close(srcFd)
+  discard posix.close(dstFd)
+  let got = cast[seq[byte]](readFile(tmpDst))
+  doAssert got.len == prefix.len + CopyLen + suffix.len,
+    &"B26: expected {prefix.len + CopyLen + suffix.len}, got {got.len}"
+  doAssert got[0..3] == @prefix, "B26: prefix mismatch"
+  for i in 0 ..< CopyLen:
+    doAssert got[prefix.len + i] == srcData[CopyStart + i],
+      &"B26: copy mismatch at byte {i}"
+  doAssert got[prefix.len + CopyLen .. prefix.len + CopyLen + 3] == @suffix,
+    "B26: suffix mismatch — fd position not advanced after pwrite copyRange"
+  removeFile(tmpSrc)
+  removeFile(tmpDst)
+
 # Reset flags to not pollute subsequent test runs.
 gTierCopyFileRangeFailed.store(false, moRelaxed)
 gTierSendfileFailed.store(false, moRelaxed)

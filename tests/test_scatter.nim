@@ -4,7 +4,7 @@
 
 echo "--------------- Test Scatter ---------------"
 
-import std/[algorithm, math, os, posix, strformat, strutils, tempfiles]
+import std/[algorithm, atomics, math, os, posix, strformat, strutils, tempfiles]
 import test_utils
 import "../src/blocky/bgzf"
 import "../src/blocky/scatter"
@@ -471,3 +471,18 @@ timed("S15", "scatter: header+data in same block, no duplicate headers"):
   scatter(fixturePath, 2, tmpl, 1, forceScan = true)
   checkShards(fixturePath, tmpl, 2)
   removeDir(tmpDir)
+
+# ---------------------------------------------------------------------------
+# S16 — scatter with forced pread/pwrite tier
+# ---------------------------------------------------------------------------
+
+timed("S16", "scatter pwrite tier: 4 shards, completeness, order"):
+  gTierCopyFileRangeFailed.store(true, moRelaxed)
+  gTierSendfileFailed.store(true, moRelaxed)
+  let tmpDir = createTempDir("blocky_", "")
+  let tmpl = tmpDir / "shard.{}.vcf.gz"
+  scatter(SmallVcf, 4, tmpl)
+  checkShards(SmallVcf, tmpl, 4)
+  removeDir(tmpDir)
+  gTierCopyFileRangeFailed.store(false, moRelaxed)
+  gTierSendfileFailed.store(false, moRelaxed)
